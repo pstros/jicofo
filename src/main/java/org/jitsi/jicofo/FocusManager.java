@@ -187,7 +187,7 @@ public class FocusManager
      * FIXME: remove eventually if not used anymore
      * The list of {@link FocusAllocationListener}.
      */
-    private FocusAllocationListener focusAllocListener;
+    private List<FocusAllocationListener> focusAllocListeners = new ArrayList<FocusAllocationListener>();
 
     /**
      * XMPP protocol provider handler used by the focus.
@@ -524,12 +524,10 @@ public class FocusManager
                     "Disposed conference for room: " + roomName
                         + " conference count: " + conferences.size());
 
-            // It is not clear whether the code below necessarily needs to
-            // hold the lock or not.
-            if (focusAllocListener != null)
-            {
-                focusAllocListener.onFocusDestroyed(roomName);
-            }
+        for (FocusAllocationListener listener : this.focusAllocListeners)
+        {
+            listener.onFocusDestroyed(roomName);
+        }
 
             // Send focus destroyed event
             EventAdmin eventAdmin = FocusBundleActivator.getEventAdmin();
@@ -618,9 +616,9 @@ public class FocusManager
      * allocation/disposal.
      * @param l the listener instance to be registered.
      */
-    public void setFocusAllocationListener(FocusAllocationListener l)
+    public synchronized void setFocusAllocationListener(FocusAllocationListener l)
     {
-        this.focusAllocListener = l;
+        this.focusAllocListeners.add(l);
     }
 
     /**
