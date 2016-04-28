@@ -119,7 +119,7 @@ public class ApiHandler
                         entry.getKey(), String.valueOf(entry.getValue())));
         }
 
-        post.setEntity(new UrlEncodedFormEntity(nameValuePairs, "UTF8"));
+        post.setEntity(new UrlEncodedFormEntity(nameValuePairs, "UTF-8"));
 
         logger.info("Sending post: " + jsonMap);
 
