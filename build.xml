@@ -44,6 +44,9 @@
         name="packname.lin"
         value="${ant.project.name}-linux-x86-${label}"/>
     <property
+        name="packname.linarm"
+        value="${ant.project.name}-linux-arm-${label}"/>
+    <property
         name="packname.lin64"
     	value="${ant.project.name}-linux-x64-${label}"/>
     <property
@@ -257,6 +260,7 @@
             <zipfileset dir="lib" prefix="${packname.win}/lib">
                 <exclude name="native/windows-64/**"/>
                 <exclude name="native/linux/**"/>
+                <exclude name="native/linux-arm/**"/>
                 <exclude name="native/linux-64/**"/>
                 <exclude name="native/macosx/**"/>
             </zipfileset>
@@ -272,6 +276,7 @@
             <zipfileset dir="lib" prefix="${packname.win64}/lib">
                 <exclude name="native/windows/**"/>
                 <exclude name="native/linux/**"/>
+                <exclude name="native/linux-arm/**"/>
                 <exclude name="native/linux-64/**"/>
                 <exclude name="native/macosx/**"/>
             </zipfileset>
@@ -286,12 +291,29 @@
                         prefix="${packname.lin}" />
             <zipfileset dir="lib" prefix="${packname.lin}/lib">
                 <exclude name="native/windows-64/**"/>
+                <exclude name="native/linux-arm/**"/>
                 <exclude name="native/linux-64/**"/>
                 <exclude name="native/windows/**"/>
                 <exclude name="native/macosx/**"/>
             </zipfileset>
             <zipfileset file="resources/install/linux/jicofo.sh"
                         prefix="${packname.lin}" filemode="755"/>
+        </zip>
+    </target>
+
+    <target name="dist.linarm" depends="copy-runtime-dependencies-from-maven,make">
+        <zip destfile="${dist}/linux-arm/${packname.linarm}.zip">
+            <zipfileset file="jicofo.jar"
+                        prefix="${packname.linarm}" />
+            <zipfileset dir="lib" prefix="${packname.linarm}/lib">
+                <exclude name="native/windows-64/**"/>
+                <exclude name="native/linux/**"/>
+                <exclude name="native/linux-64/**"/>
+                <exclude name="native/windows/**"/>
+                <exclude name="native/macosx/**"/>
+            </zipfileset>
+            <zipfileset file="resources/install/linux-arm/jicofo.sh"
+                        prefix="${packname.linarm}" filemode="755"/>
         </zip>
     </target>
 
@@ -302,6 +324,7 @@
             <zipfileset dir="lib" prefix="${packname.lin64}/lib">
                 <exclude name="native/windows-64/**"/>
                 <exclude name="native/linux/**"/>
+                <exclude name="native/linux-arm/**"/>
                 <exclude name="native/windows/**"/>
                 <exclude name="native/macosx/**"/>
             </zipfileset>
@@ -318,6 +341,7 @@
             <zipfileset dir="lib" prefix="${packname.macosx}/lib">
                 <exclude name="native/windows-64/**"/>
                 <exclude name="native/linux/**"/>
+                <exclude name="native/linux-arm/**"/>
                 <exclude name="native/linux-64/**"/>
                 <exclude name="native/windows/**"/>
             </zipfileset>

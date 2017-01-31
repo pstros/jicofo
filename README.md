@@ -67,7 +67,7 @@ var config = {
 Running Jicofo from distribution package
 =====
 
-1. Build distributon package using ant target for your OS: "dist.lin", "dist.lin64", "dist.macosx", "dist.win" or "dist.win64"
+1. Build distributon package using ant target for your OS: "dist.lin", "dist.linarm", "dist.lin64", "dist.macosx", "dist.win" or "dist.win64"
 2. Packge will be placed in 'dist/{os-name}' folder.
 3. Extract distribution package to the folder of your choice.
 4. Assuming Prosody has been configured using "Manual configuration for Prosody" 'jicofo' run script should be executed with following arguments:
