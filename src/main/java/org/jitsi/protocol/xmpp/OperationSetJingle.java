@@ -21,6 +21,7 @@ import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
 import net.java.sip.communicator.service.protocol.*;
 
 import org.jitsi.protocol.xmpp.util.*;
+import org.jxmpp.jid.*;
 
 import java.util.*;
 
@@ -58,7 +59,7 @@ public interface OperationSetJingle
      */
     boolean initiateSession(
             boolean useBundle,
-            String address,
+            Jid address,
             List<ContentPacketExtension> contents,
             JingleRequestHandler requestHandler,
             boolean[] startMuted)
@@ -96,8 +97,8 @@ public interface OperationSetJingle
      *                     the notification.
      * @param session the <tt>JingleSession</tt> used to send the notification.
      */
-    void sendAddSourceIQ(MediaSSRCMap ssrcMap,
-                         MediaSSRCGroupMap ssrcGroupMap,
+    void sendAddSourceIQ(MediaSourceMap ssrcMap,
+                         MediaSourceGroupMap ssrcGroupMap,
                          JingleSession session);
 
     /**
@@ -110,8 +111,8 @@ public interface OperationSetJingle
      *                     the notification.
      * @param session the <tt>JingleSession</tt> used to send the notification.
      */
-    void sendRemoveSourceIQ(MediaSSRCMap ssrcMap,
-                            MediaSSRCGroupMap ssrcGroupMap,
+    void sendRemoveSourceIQ(MediaSourceMap ssrcMap,
+                            MediaSourceGroupMap ssrcGroupMap,
                             JingleSession session);
 
     /**

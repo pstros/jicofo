@@ -26,6 +26,7 @@ import net.java.sip.communicator.service.protocol.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.util.*;
 import org.jitsi.util.*;
+import org.jxmpp.jid.*;
 
 import java.util.*;
 
@@ -105,16 +106,16 @@ public class LipSyncHack implements OperationSetJingle
         this.logger = Logger.getLogger(classLogger, conference.getLogger());
     }
 
-    private MediaSSRCMap getParticipantSSRCMap(String mucJid)
+    private MediaSourceMap getParticipantSSRCMap(Jid mucJid)
     {
         Participant p = conference.findParticipantForRoomJid(mucJid);
         if (p == null)
         {
             logger.warn("No participant found for: " + mucJid);
             // Return empty to avoid null checks
-            return new MediaSSRCMap();
+            return new MediaSourceMap();
         }
-        return p.getSSRCsCopy();
+        return p.getSourcesCopy();
     }
 
     /**
@@ -129,8 +130,8 @@ public class LipSyncHack implements OperationSetJingle
      * @return <tt>true</tt> if it's OK to merge audio+video streams or
      *         <tt>false</tt> otherwise.
      */
-    private boolean isOkToMergeParticipantAV(String    participantJid,
-                                             String    ownerJid)
+    private boolean isOkToMergeParticipantAV(Jid participantJid,
+                                             Jid ownerJid)
     {
         Participant participant
             = conference.findParticipantForRoomJid(participantJid);
@@ -165,9 +166,9 @@ public class LipSyncHack implements OperationSetJingle
         return supportsLipSync;
     }
 
-    private void doMerge(String          participant,
-                         String          owner,
-                         MediaSSRCMap    ssrcs)
+    private void doMerge(Jid            participant,
+                         Jid            owner,
+                         MediaSourceMap ssrcs)
     {
         boolean merged = false;
         if (isOkToMergeParticipantAV(participant, owner))
@@ -200,19 +201,19 @@ public class LipSyncHack implements OperationSetJingle
      */
     private void processAllParticipantsSSRCs(
             List<ContentPacketExtension>    contents,
-            String                          mucJid)
+            Jid                             mucJid)
     {
         // Split into maps on per owner basis
-        Map<String, MediaSSRCMap> perOwnerMapping
+        Map<Jid, MediaSourceMap> perOwnerMapping
             = SSRCSignaling.ownerMapping(contents);
 
-        for (Map.Entry<String, MediaSSRCMap> ownerSSRCs
+        for (Map.Entry<Jid, MediaSourceMap> ownerSSRCs
                 : perOwnerMapping.entrySet())
         {
-            String ownerJid = ownerSSRCs.getKey();
-            if (!StringUtils.isNullOrEmpty(ownerJid))
+            Jid ownerJid = ownerSSRCs.getKey();
+            if (ownerJid != null)
             {
-                MediaSSRCMap ssrcMap = ownerSSRCs.getValue();
+                MediaSourceMap ssrcMap = ownerSSRCs.getValue();
                 if (ssrcMap != null)
                 {
                     doMerge(mucJid, ownerJid, ssrcMap);
@@ -238,7 +239,7 @@ public class LipSyncHack implements OperationSetJingle
     @Override
     public boolean initiateSession(
             boolean                         useBundle,
-            String                          address,
+            Jid                             address,
             List<ContentPacketExtension>    contents,
             JingleRequestHandler            requestHandler,
             boolean[]                       startMuted)
@@ -283,30 +284,30 @@ public class LipSyncHack implements OperationSetJingle
      */
     @Override
     public void sendAddSourceIQ(
-            MediaSSRCMap        ssrcMap,
-            MediaSSRCGroupMap   ssrcGroupMap,
+            MediaSourceMap ssrcMap,
+            MediaSourceGroupMap ssrcGroupMap,
             JingleSession       session)
     {
-        String mucJid = session.getAddress();
+        Jid mucJid = session.getAddress();
         // If this is source add for video only then add audio for merge process
         for (SourcePacketExtension videoSSRC
-                : ssrcMap.getSSRCsForMedia("video"))
+                : ssrcMap.getSourcesForMedia("video"))
         {
-            String owner = SSRCSignaling.getSSRCOwner(videoSSRC);
+            Jid owner = SSRCSignaling.getSSRCOwner(videoSSRC);
             SourcePacketExtension audioSSRC
                 = ssrcMap.findSSRCforOwner("audio", owner);
             if (audioSSRC == null)
             {
                 // Try finding corresponding audio from the global conference
                 // state for this owner
-                MediaSSRCMap allOwnersSSRCs = getParticipantSSRCMap(owner);
+                MediaSourceMap allOwnersSSRCs = getParticipantSSRCMap(owner);
                 List<SourcePacketExtension> audioSSRCs
-                    = allOwnersSSRCs.getSSRCsForMedia("audio");
+                    = allOwnersSSRCs.getSourcesForMedia("audio");
                 audioSSRC = SSRCSignaling.getFirstWithMSID(audioSSRCs);
             }
             if (audioSSRC != null)
             {
-                ssrcMap.addSSRC("audio", audioSSRC);
+                ssrcMap.addSource("audio", audioSSRC);
                 doMerge(mucJid, owner, ssrcMap);
                 ssrcMap.remove("audio", audioSSRC);
             }
@@ -331,8 +332,8 @@ public class LipSyncHack implements OperationSetJingle
      */
     @Override
     public void sendRemoveSourceIQ(
-            MediaSSRCMap        ssrcMap,
-            MediaSSRCGroupMap   ssrcGroupMap,
+            MediaSourceMap ssrcMap,
+            MediaSourceGroupMap ssrcGroupMap,
             JingleSession       session)
     {
         jingleImpl.sendRemoveSourceIQ(ssrcMap, ssrcGroupMap, session);

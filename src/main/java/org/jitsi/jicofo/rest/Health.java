@@ -18,7 +18,9 @@
 package org.jitsi.jicofo.rest;
 
 import java.io.*;
+import java.lang.management.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.logging.*;
 import javax.servlet.*;
 import javax.servlet.http.*;
@@ -26,9 +28,12 @@ import javax.servlet.http.*;
 import org.eclipse.jetty.server.*;
 
 import org.jitsi.jicofo.*;
-import org.jitsi.util.*;
 import org.jitsi.util.Logger;
 import org.json.simple.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
+import org.jxmpp.jid.parts.*;
+import org.jxmpp.stringprep.*;
 
 /**
  * Checks the health of {@link FocusManager}.
@@ -79,6 +84,12 @@ public class Health
     private static final int STATUS_CACHE_INTERVAL = 1000;
 
     /**
+     * Interval which we consider bad for a health check and we will print
+     * some debug information.
+     */
+    private static final int BAD_HEALTH_CHECK_INTERVAL = 3000;
+
+    /**
      * Checks the health (status) of a specific {@link FocusManager}.
      *
      * @param focusManager the {@code FocusManager} to check the health (status)
@@ -93,9 +104,9 @@ public class Health
         // Get the MUC service to perform the check on.
         JitsiMeetServices services = focusManager.getJitsiMeetServices();
 
-        String mucService = services != null ? services.getMucService() : null;
+        Jid mucService = services != null ? services.getMucService() : null;
 
-        if (StringUtils.isNullOrEmpty(mucService))
+        if (mucService == null)
         {
             logger.error(
                 "No MUC service found on XMPP domain or Jicofo has not" +
@@ -106,11 +117,12 @@ public class Health
 
         // Generate a pseudo-random room name. Minimize the risk of clashing
         // with existing conferences.
-        String roomName;
+        EntityBareJid roomName;
 
         do
         {
-            roomName = generateRoomName() + "@" + mucService;
+            roomName = JidCreate.entityBareFrom(generateRoomName(),
+                    mucService.asDomainBareJid());
         }
         while (focusManager.getConference(roomName) != null);
 
@@ -130,13 +142,21 @@ public class Health
      *
      * @return a pseudo-random room name which is not guaranteed to be unique
      */
-    private static String generateRoomName()
+    private static Localpart generateRoomName()
     {
-        return
-            Health.class.getName()
-                + "-"
-                + Long.toHexString(
-                        System.currentTimeMillis() + RANDOM.nextLong());
+        try
+        {
+            return
+                Localpart.from(Health.class.getName()
+                    + "-"
+                    + Long.toHexString(
+                            System.currentTimeMillis() + RANDOM.nextLong()));
+        }
+        catch (XmppStringprepException e)
+        {
+            // ignore, cannot happen
+            return null;
+        }
     }
 
     /**
@@ -174,7 +194,7 @@ public class Health
             {
                 //caller asked that we check for active bridges.
                 // we fail in case we don't
-                List<String> activeJVBs = listBridges(focusManager);
+                List<Jid> activeJVBs = listBridges(focusManager);
 
                 // ABORT here if the list is empty
                 if (activeJVBs.isEmpty())
@@ -205,9 +225,26 @@ public class Health
             }
             else
             {
-                check(focusManager);
+                HealthChecksMonitor monitor = null;
+                if (focusManager.isHealthChecksDebugEnabled())
+                {
+                    monitor = new HealthChecksMonitor();
+                    monitor.start();
+                }
 
-                status = cacheStatus(HttpServletResponse.SC_OK);
+                try
+                {
+                    check(focusManager);
+
+                    status = cacheStatus(HttpServletResponse.SC_OK);
+                }
+                finally
+                {
+                    if (monitor != null)
+                    {
+                        monitor.stop();
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -247,7 +284,7 @@ public class Health
      * @param focusManager our current context
      * @return the list of healthy bridges currently known to this focus.
      */
-    private static List<String> listBridges(FocusManager focusManager)
+    private static List<Jid> listBridges(FocusManager focusManager)
     {
         JitsiMeetServices services
             = Objects.requireNonNull(
@@ -256,8 +293,116 @@ public class Health
         BridgeSelector bridgeSelector
             = Objects.requireNonNull(
                     services.getBridgeSelector(), "bridgeSelector");
-        List<String> activeJVBs = bridgeSelector.listActiveJVBs();
 
-        return activeJVBs;
+        return bridgeSelector.listActiveJVBs();
+    }
+
+    /**
+     * Health check monitor schedules execution with a delay
+     * {@link Health#BAD_HEALTH_CHECK_INTERVAL} if monitor is not stopped
+     * by the time it executes we consider a health check was taking too much
+     * time executing and we dump the stack trace in the logs.
+     */
+    private static class HealthChecksMonitor
+        extends TimerTask
+    {
+        /**
+         * The timer that will check for slow health executions.
+         */
+        private Timer monitorTimer;
+
+        /**
+         * The timestamp when monitoring was started.
+         */
+        private long startedAt = -1;
+
+        @Override
+        public void run()
+        {
+            // if there is no timer, this means we were stopped
+            if (this.monitorTimer == null)
+            {
+                return;
+            }
+
+            // this monitoring was not stopped before the bad interval
+            // this means it takes too much time
+            ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
+            ThreadInfo[] threadInfos = threadMXBean.getThreadInfo(
+                    threadMXBean.getAllThreadIds(), 100);
+            StringBuilder dbg = new StringBuilder();
+            for (ThreadInfo threadInfo : threadInfos)
+            {
+                dbg.append('"').append(threadInfo.getThreadName()).append('"');
+
+                Thread.State state = threadInfo.getThreadState();
+                dbg.append("\n   java.lang.Thread.State: ").append(state);
+
+                if (threadInfo.getLockName() != null)
+                {
+                    dbg.append(" on ").append(threadInfo.getLockName());
+                }
+                dbg.append('\n');
+
+                StackTraceElement[] stackTraceElements
+                    = threadInfo.getStackTrace();
+                for (int i = 0; i < stackTraceElements.length; i++)
+                {
+                    StackTraceElement ste = stackTraceElements[i];
+                    dbg.append("\tat " + ste.toString());
+                    dbg.append('\n');
+                    if (i == 0 && threadInfo.getLockInfo() != null)
+                    {
+                        Thread.State ts = threadInfo.getThreadState();
+                        if (ts == Thread.State.BLOCKED
+                            || ts == Thread.State.WAITING
+                            || ts == Thread.State.TIMED_WAITING)
+                        {
+                            dbg.append("\t-  " + ts + " on "
+                                + threadInfo.getLockInfo());
+                            dbg.append('\n');
+                        }
+                    }
+
+                    for (MonitorInfo mi
+                            : threadInfo.getLockedMonitors())
+                    {
+                        if (mi.getLockedStackDepth() == i) {
+                            dbg.append("\t-  locked " + mi);
+                            dbg.append('\n');
+                        }
+                    }
+                }
+                dbg.append("\n\n");
+            }
+            logger.error("Health check took "
+                + (System.currentTimeMillis() - this.startedAt)
+                + " ms. \n"
+                + dbg.toString());
+        }
+
+        /**
+         * Starts the monitor. Schedules execution in separate thread
+         * after some interval, if monitor is not stopped and it executes
+         * we consider the health check took too much time.
+         */
+        public void start()
+        {
+            this.startedAt = System.currentTimeMillis();
+            this.monitorTimer = new Timer(getClass().getSimpleName(), true);
+            this.monitorTimer.schedule(this, BAD_HEALTH_CHECK_INTERVAL);
+        }
+
+        /**
+         * Stops the monitor execution time.
+         */
+        public void stop()
+        {
+            if (this.monitorTimer != null)
+            {
+                this.monitorTimer.cancel();
+                this.monitorTimer = null;
+            }
+        }
     }
 }

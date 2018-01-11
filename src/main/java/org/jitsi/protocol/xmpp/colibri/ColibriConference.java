@@ -23,6 +23,8 @@ import net.java.sip.communicator.service.protocol.*;
 
 import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.util.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.parts.*;
 
 import java.util.*;
 
@@ -41,13 +43,13 @@ public interface ColibriConference
      *
      * @param videobridgeJid the videobridge address to be set.
      */
-    void setJitsiVideobridge(String videobridgeJid);
+    void setJitsiVideobridge(Jid videobridgeJid);
 
     /**
      * Returns XMPP address of currently used videobridge or <tt>null</tt>
      * if the isn't any.
      */
-    String getJitsiVideobridge();
+    Jid getJitsiVideobridge();
 
     /**
      * Returns the identifier assigned for our conference by the videobridge.
@@ -68,13 +70,13 @@ public interface ColibriConference
      * Sets world readable name that identifies the conference.
      * @param name the new name.
      */
-    void setName(String name);
+    void setName(Localpart name);
 
     /**
      * Gets world readable name that identifies the conference.
      * @return the name.
      */
-    String getName();
+    Localpart getName();
 
     /**
      * Returns <tt>true</tt> if conference has been allocated during last
@@ -93,6 +95,7 @@ public interface ColibriConference
      * @param useBundle <tt>true</tt> if channel transport bundle should be used
      *                  for this allocation.
      * @param endpointName the name that will identify channels endpoint.
+     * @param statsId the statistics Id to use if any.
      * @param peerIsInitiator <tt>true</tt> if peer is ICE an initiator
      *                        of ICE session.
      * @param contents content list that describes peer media.
@@ -104,6 +107,7 @@ public interface ColibriConference
     ColibriConferenceIQ createColibriChannels(
             boolean                         useBundle,
             String                          endpointName,
+            String                          statsId,
             boolean                         peerIsInitiator,
             List<ContentPacketExtension>    contents)
         throws    OperationFailedException;
@@ -121,11 +125,11 @@ public interface ColibriConference
      * <tt>RtpDescriptionPacketExtension</tt> which will be used to update
      * the RTP description of the channel in corresponding content described by
      * <tt>localChannelsInfo</tt>.
-     * @param ssrcs (optional) the <tt>MediaSSRCMap</tt> which maps Colibri
+     * @param ssrcs (optional) the <tt>MediaSourceMap</tt> which maps Colibri
      * content name to a list of <tt>SourcePacketExtension</tt> which will be
      * used to update SSRCs of the channel in corresponding content described by
      * <tt>localChannelsInfo</tt>.
-     * @param ssrcGroups (optional) the <tt>MediaSSRCGroupMap</tt> which maps
+     * @param ssrcGroups (optional) the <tt>MediaSourceGroupMap</tt> which maps
      * Colibri content name to a list of <tt>SourceGroupPacketExtension</tt>
      * which will be used to update SSRCs of the channel in corresponding
      * content described by <tt>localChannelsInfo</tt>.
@@ -137,14 +141,18 @@ public interface ColibriConference
      * <tt>IceUdpTransportPacketExtension</tt> to Colibri content name
      * which will be used to update transport of the channels in corresponding
      * content described by <tt>localChannelsInfo</tt>.
+     * @param endpointId the ID of the endpoint for which the update applies
+     * (it is implicit that the update only works for channels of a single
+     * participant/endpoint).
      */
     void updateChannelsInfo(
-            ColibriConferenceIQ                            localChannelsInfo,
-            Map<String, RtpDescriptionPacketExtension>     rtpInfoMap,
-            MediaSSRCMap                                   ssrcs,
-            MediaSSRCGroupMap                              ssrcGroups,
-            IceUdpTransportPacketExtension                 bundleTransport,
-            Map<String, IceUdpTransportPacketExtension>    transportMap);
+            ColibriConferenceIQ localChannelsInfo,
+            Map<String, RtpDescriptionPacketExtension> rtpInfoMap,
+            MediaSourceMap ssrcs,
+            MediaSourceGroupMap ssrcGroups,
+            IceUdpTransportPacketExtension bundleTransport,
+            Map<String, IceUdpTransportPacketExtension> transportMap,
+            String endpointId);
 
     /**
      * Updates the RTP description for active channels (existing on the bridge).
@@ -182,25 +190,21 @@ public interface ColibriConference
      *                          on the bridge.</tt>
      */
     void updateSourcesInfo(
-            MediaSSRCMap           ssrcs,
-            MediaSSRCGroupMap      ssrcGroups,
+            MediaSourceMap ssrcs,
+            MediaSourceGroupMap ssrcGroups,
             ColibriConferenceIQ    localChannelsInfo);
 
     /**
-     * Updates channel bundle transport information for channels described by
-     * <tt>localChannelsInfo</tt>. Single transport is set on the bundle shared
-     * by all channels described by given IQ and only one bundle group can be
-     * updated by single call to this method.
+     * Updates the transport of a specific channel bundle.
      *
      * @param transport the transport packet extension that contains channel
-     *                  bundle transport candidates.
-     * @param localChannelsInfo <tt>ColibriConferenceIQ</tt> that contains
-     *                          the description of the channels sharing the same
-     *                          bundle group.
+     * bundle transport candidates.
+     * @param channelBundleId the ID of the channel bundle for which to update
+     * the transport.
      */
     void updateBundleTransportInfo(
-            IceUdpTransportPacketExtension    transport,
-            ColibriConferenceIQ               localChannelsInfo);
+            IceUdpTransportPacketExtension transport,
+            String channelBundleId);
 
     /**
      * Expires the channels described by given <tt>ColibriConferenceIQ</tt>.
@@ -242,4 +246,9 @@ public interface ColibriConference
      *         <tt>false</tt> otherwise.
      */
     boolean isDisposed();
+
+    /**
+     * Sets the "global" id of the conference.
+     */
+    void setGID(String gid) ;
 }

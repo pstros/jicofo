@@ -19,7 +19,9 @@ package org.jitsi.protocol.xmpp;
 
 import net.java.sip.communicator.service.protocol.*;
 
+import org.jivesoftware.smack.iqrequest.*;
 import org.jivesoftware.smack.packet.*;
+import org.jxmpp.jid.*;
 
 /**
  * The interface for Smack XMPP connection.
@@ -28,16 +30,18 @@ import org.jivesoftware.smack.packet.*;
  */
 public interface XmppConnection
 {
+    EntityFullJid getUser();
+
     /**
      * Sends given XMPP packet through this connection.
      * XXX The method will silently fail to send the packet if the XMPP
-     * connection is broken(not connected). Use this method only if such
-     * behaviour is desired, otherwise {@link #sendPacketAndGetReply(Packet)}
+     * connection is broken (not connected). Use this method only if such
+     * behaviour is desired, otherwise {@link #sendPacketAndGetReply(IQ)}
      * should be used instead.
      *
      * @param packet the packet to be sent.
      */
-    void sendPacket(Packet packet);
+    void sendStanza(Stanza packet);
 
     /**
      * Sends the packet and wait for reply in blocking mode.
@@ -51,6 +55,10 @@ public interface XmppConnection
      * {@link OperationFailedException#PROVIDER_NOT_REGISTERED} error code if
      * the packet could not be sent, because the XMPP connection is broken.
      */
-    Packet sendPacketAndGetReply(Packet packet)
+    IQ sendPacketAndGetReply(IQ packet)
         throws OperationFailedException;
+
+    IQRequestHandler registerIQRequestHandler(IQRequestHandler handler);
+
+    IQRequestHandler unregisterIQRequestHandler(IQRequestHandler handler);
 }

@@ -21,6 +21,7 @@ import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
 import net.java.sip.communicator.impl.protocol.jabber.jinglesdp.*;
 
+import org.jitsi.jicofo.*;
 import org.jitsi.util.*;
 
 import java.util.*;
@@ -30,7 +31,7 @@ import java.util.*;
  *
  * @author Pawel Domas
  */
-public class SSRCGroup
+public class SourceGroup
 {
     /**
      * Underlying source group packet extension.
@@ -38,16 +39,16 @@ public class SSRCGroup
     private final SourceGroupPacketExtension group;
 
     /**
-     * Extracts SSRC groups from Jingle content packet extension.
+     * Extracts source groups from Jingle content packet extension.
      * @param content the <tt>ContentPacketExtension</tt> that contains(or not)
-     *                the description of SSRC groups.
-     * @return the list of <tt>SSRCGroup</tt>s described by given
+     *                the description of source groups.
+     * @return the list of <tt>SourceGroup</tt>s described by given
      *         <tt>ContentPacketExtension</tt>.
      */
-    public static List<SSRCGroup> getSSRCGroupsForContent(
+    public static List<SourceGroup> getSourceGroupsForContent(
             ContentPacketExtension content)
     {
-        List<SSRCGroup> groups = new ArrayList<SSRCGroup>();
+        List<SourceGroup> groups = new ArrayList<SourceGroup>();
 
         RtpDescriptionPacketExtension rtpDescPe
             = JingleUtils.getRtpDescription(content);
@@ -63,36 +64,49 @@ public class SSRCGroup
 
         for (SourceGroupPacketExtension groupPe : groupExtensions)
         {
-            groups.add(new SSRCGroup(groupPe));
+            groups.add(new SourceGroup(groupPe));
         }
 
         return groups;
     }
 
     /**
-     * Creates new instance of <tt>SSRCGroup</tt>.
-     * @param group the packet extension that described SSRC group to be wrapped
+     * Creates new instance of <tt>SourceGroup</tt>.
+     * @param group the packet extension that described source group to be wrapped
      *              by new object.
      * @throws NullPointerException if <tt>group</tt> is <tt>null</tt>.
      */
-    public SSRCGroup(SourceGroupPacketExtension group)
+    public SourceGroup(SourceGroupPacketExtension group)
     {
         this.group = Objects.requireNonNull(group, "group");
     }
 
     /**
-     * Adds SSRC to this group.
-     *
-     * @param ssrcPe the <tt>SourcePacketExtension</tt> to be added to this
-     *               group.
+     * Creates new instance of <tt>SourceGroup</tt>.
+     * @param semantics the group's semantics
+     * @param sources a {@link List} of the group's
+     *        {@link SourcePacketExtension}s
      */
-    public void addSource(SourcePacketExtension ssrcPe)
+    public SourceGroup(String semantics, List<SourcePacketExtension> sources)
     {
-        group.addChildExtension(ssrcPe);
+        group = new SourceGroupPacketExtension();
+        group.setSemantics(semantics);
+        group.addSources(sources);
     }
 
     /**
-     * Adds the list of SSRCs to this group.
+     * Adds source to this group.
+     *
+     * @param source the <tt>SourcePacketExtension</tt> to be added to this
+     *               group.
+     */
+    public void addSource(SourcePacketExtension source)
+    {
+        group.addChildExtension(source);
+    }
+
+    /**
+     * Adds the list of sources to this group.
      *
      * @param video the list of <tt>SourcePacketExtension</tt> which will be
      *              added to this group.
@@ -103,7 +117,47 @@ public class SSRCGroup
     }
 
     /**
-     * Returns the SSRC contained in this group.
+     * Checks if given {@link SourcePacketExtension} is part of this group.
+     *
+     * @param source {@link SourcePacketExtension} to be checked.
+     *
+     * @return <tt>true</tt> or <tt>false</tt>
+     */
+    public boolean belongsToGroup(SourcePacketExtension source)
+    {
+        for (SourcePacketExtension groupSrcs : this.getSources())
+        {
+            if (groupSrcs.sourceEquals(source))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Obtains group's MSID.
+     *
+     * NOTE it makes sense only once the attributes have been copied from
+     * the media section {@link SourcePacketExtension}s, as normally
+     * {@link SourcePacketExtension}s signalled inside of
+     * {@link SourceGroupPacketExtension} do not contain any parameters
+     * including MSID. See {@link SSRCValidator#copySourceParamsToGroups()}.
+     *
+     * @return a {@link String}
+     */
+    public String getGroupMsid()
+    {
+        List<SourcePacketExtension> sources = this.group.getSources();
+
+        return sources.size() > 0
+            ? SSRCSignaling.getMsid(sources.get(0))
+            : null;
+    }
+
+    /**
+     * Returns the sources contained in this group.
      * @return the internal list that stores <tt>SourcePacketExtension</tt>
      */
     public List<SourcePacketExtension> getSources()
@@ -121,7 +175,7 @@ public class SSRCGroup
 
     /**
      * Returns the underlying <tt>SourceGroupPacketExtension</tt> wrapped by
-     * this <tt>SSRCGroup</tt> instance.
+     * this <tt>SourceGroup</tt> instance.
      */
     public SourceGroupPacketExtension getPacketExtension()
     {
@@ -129,22 +183,22 @@ public class SSRCGroup
     }
 
     /**
-     * Returns full copy of this <tt>SSRCGroup</tt>.
+     * Returns full copy of this <tt>SourceGroup</tt>.
      */
-    public SSRCGroup copy()
+    public SourceGroup copy()
     {
-        return new SSRCGroup(getExtensionCopy());
+        return new SourceGroup(getExtensionCopy());
     }
 
     @Override
     public boolean equals(Object obj)
     {
-        if (!(obj instanceof SSRCGroup))
+        if (!(obj instanceof SourceGroup))
         {
             return false;
         }
 
-        SSRCGroup other = (SSRCGroup) obj;
+        SourceGroup other = (SourceGroup) obj;
         String semantics = other.group.getSemantics();
         if (StringUtils.isNullOrEmpty(semantics)
             && !StringUtils.isNullOrEmpty(group.getSemantics()))
@@ -155,12 +209,12 @@ public class SSRCGroup
         {
             return false;
         }
-        for (SourcePacketExtension ssrcToFind : group.getSources())
+        for (SourcePacketExtension sourceToFind : group.getSources())
         {
             boolean found = false;
-            for (SourcePacketExtension ssrc : other.group.getSources())
+            for (SourcePacketExtension source : other.group.getSources())
             {
-                if (ssrc.getSSRC() == ssrcToFind.getSSRC())
+                if (source.sourceEquals(sourceToFind))
                 {
                     found = true;
                     break;
@@ -175,10 +229,10 @@ public class SSRCGroup
     }
 
     /**
-     * Check if this <tt>SSRCGroup</tt> contains any
+     * Check if this <tt>SourceGroup</tt> contains any
      * <tt>SourceGroupPacketExtension</tt>s.
      *
-     * @return <tt>true</tt> if this <tt>SSRCGroup</tt> is empty or
+     * @return <tt>true</tt> if this <tt>SourceGroup</tt> is empty or
      *         <tt>false</tt> otherwise.
      */
     public boolean isEmpty()
@@ -189,13 +243,13 @@ public class SSRCGroup
     @Override
     public String toString()
     {
-        StringBuilder ssrcs = new StringBuilder();
-        for (SourcePacketExtension ssrc : this.group.getSources())
+        StringBuilder sources = new StringBuilder();
+        for (SourcePacketExtension source : this.group.getSources())
         {
             // FIXME do not print for the last element
-            ssrcs.append(ssrc.getSSRC()).append(", ");
+            sources.append(source.toString()).append(", ");
         }
-        return "SSRCGroup[" + this.group.getSemantics() + ", " + ssrcs
+        return "SourceGroup[" + this.group.getSemantics() + ", " + sources
             + "]@" + Integer.toHexString(hashCode());
     }
 

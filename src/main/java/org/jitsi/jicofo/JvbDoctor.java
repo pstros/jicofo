@@ -19,6 +19,7 @@ package org.jitsi.jicofo;
 
 import net.java.sip.communicator.impl.protocol.jabber.extensions.health.*;
 import net.java.sip.communicator.service.protocol.*;
+import net.java.sip.communicator.service.protocol.event.*;
 import net.java.sip.communicator.util.*;
 
 import org.jitsi.eventadmin.*;
@@ -32,6 +33,7 @@ import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.packet.*;
 
+import org.jxmpp.jid.*;
 import org.osgi.framework.*;
 
 import java.util.*;
@@ -52,6 +54,7 @@ import java.util.concurrent.*;
  */
 public class JvbDoctor
     extends EventHandlerActivator
+    implements RegistrationStateChangeListener
 {
     /**
      * The logger.
@@ -106,7 +109,7 @@ public class JvbDoctor
     /**
      * Health check tasks map.
      */
-    private final Map<String, ScheduledFuture> tasks
+    private final Map<Jid, ScheduledFuture> tasks
         = new ConcurrentHashMap<>();
 
     /**
@@ -134,7 +137,7 @@ public class JvbDoctor
     /**
      * XMPP operation set obtained from {@link #protocolProvider}.
      */
-    private OperationSetDirectSmackXmpp xmppOpSet;
+    private XmppConnection connection;
 
     /**
      * Creates new instance of <tt>JvbDoctor</tt>.
@@ -192,11 +195,13 @@ public class JvbDoctor
                     "ProtocolProvider is not an XMPP one");
         }
 
-        xmppOpSet
-            = protocolProvider.getOperationSet(
-                    OperationSetDirectSmackXmpp.class);
-
-        Objects.requireNonNull(xmppOpSet, "xmppOpSet");
+        protocolProvider.addRegistrationStateChangeListener(this);
+        connection
+            = Objects.requireNonNull(
+                    protocolProvider.getOperationSet(
+                            OperationSetDirectSmackXmpp.class),
+                    "xmppOpSet")
+                 .getXmppConnection();
 
         capsOpSet
             = protocolProvider.getOperationSet(
@@ -222,8 +227,8 @@ public class JvbDoctor
         try
         {
             // Remove scheduled tasks
-            ArrayList<String> bridges = new ArrayList<>(tasks.keySet());
-            for (String bridge : bridges)
+            ArrayList<Jid> bridges = new ArrayList<>(tasks.keySet());
+            for (Jid bridge : bridges)
             {
                 removeBridge(bridge);
             }
@@ -232,6 +237,11 @@ public class JvbDoctor
         {
             this.eventAdminRef = null;
             this.executorServiceRef = null;
+            if (this.protocolProvider != null)
+            {
+                this.protocolProvider
+                    .removeRegistrationStateChangeListener(this);
+            }
             this.protocolProvider = null;
             this.osgiBc = null;
         }
@@ -264,7 +274,7 @@ public class JvbDoctor
         }
     }
 
-    private void addBridge(String bridgeJid)
+    private void addBridge(Jid bridgeJid)
     {
         if (tasks.containsKey(bridgeJid))
         {
@@ -291,7 +301,7 @@ public class JvbDoctor
         logger.info("Scheduled health-check task for: " + bridgeJid);
     }
 
-    private void removeBridge(String bridgeJid)
+    private void removeBridge(Jid bridgeJid)
     {
         ScheduledFuture healthTask = tasks.remove(bridgeJid);
         if (healthTask == null)
@@ -307,7 +317,7 @@ public class JvbDoctor
         healthTask.cancel(true);
     }
 
-    private void notifyHealthCheckFailed(String bridgeJid, XMPPError error)
+    private void notifyHealthCheckFailed(Jid bridgeJid, XMPPError error)
     {
         EventAdmin eventAdmin = eventAdminRef.get();
         if (eventAdmin == null)
@@ -324,9 +334,33 @@ public class JvbDoctor
         eventAdmin.postEvent(BridgeEvent.createHealthFailed(bridgeJid));
     }
 
+    /**
+     * When the xmpp protocol provider got registered, its maybe reconnection
+     * we need to get the connection. It can happen that on startup the initial
+     * obtaining the connection returns null and we get it later when the
+     * provider got actually registered.
+     *
+     * @param registrationStateChangeEvent
+     */
+    @Override
+    public void registrationStateChanged(
+        RegistrationStateChangeEvent registrationStateChangeEvent)
+    {
+        RegistrationState newState = registrationStateChangeEvent.getNewState();
+
+        if (RegistrationState.REGISTERED.equals(newState))
+        {
+            connection
+                = Objects.requireNonNull(
+                    protocolProvider.getOperationSet(
+                        OperationSetDirectSmackXmpp.class),
+                    "xmppOpSet").getXmppConnection();
+        }
+    }
+
     private class HealthCheckTask implements Runnable
     {
-        private final String bridgeJid;
+        private final Jid bridgeJid;
 
         /**
          * Indicates whether or not the bridge has health-check support.
@@ -335,7 +369,7 @@ public class JvbDoctor
          */
         private Boolean hasHealthCheckSupport;
 
-        public HealthCheckTask(String bridgeJid)
+        public HealthCheckTask(Jid bridgeJid)
         {
             this.bridgeJid = bridgeJid;
         }
@@ -362,7 +396,7 @@ public class JvbDoctor
                 if (!tasks.containsKey(bridgeJid))
                 {
                     logger.info(
-                            "Health check task cancelled for: " + bridgeJid);
+                            "Health check task canceled for: " + bridgeJid);
                     return false;
                 }
                 return true;
@@ -395,11 +429,11 @@ public class JvbDoctor
             }
         }
 
-        private HealthCheckIQ newHealthCheckIQ(String bridgeJid)
+        private HealthCheckIQ newHealthCheckIQ(Jid bridgeJid)
         {
             HealthCheckIQ healthIq = new HealthCheckIQ();
             healthIq.setTo(bridgeJid);
-            healthIq.setType(IQ.Type.GET);
+            healthIq.setType(IQ.Type.get);
             return healthIq;
         }
 
@@ -412,15 +446,13 @@ public class JvbDoctor
             throws OperationFailedException
         {
             // If XMPP is currently not connected skip the health-check
-            if (!protocolProvider.isRegistered())
+            if (!protocolProvider.isRegistered() || connection == null)
             {
-                logger.debug(
+                logger.warn(
                         "XMPP disconnected - skipping health check for: "
                             + bridgeJid);
                 return;
             }
-
-            XmppConnection connection;
 
             // Sync on start/stop and bridges state
             synchronized (JvbDoctor.this)
@@ -437,13 +469,12 @@ public class JvbDoctor
                     return;
                 }
 
-                connection = xmppOpSet.getXmppConnection();
-
                 logger.debug("Sending health-check request to: " + bridgeJid);
             }
 
-            Packet response = connection.sendPacketAndGetReply(
-                    newHealthCheckIQ(bridgeJid));
+            IQ response
+                = connection.sendPacketAndGetReply(
+                        newHealthCheckIQ(bridgeJid));
 
             // On timeout we'll give it one more try
             if (response == null && secondChanceDelay > 0)
@@ -462,8 +493,9 @@ public class JvbDoctor
                     if (!checkTaskStillValid())
                         return;
 
-                    response = connection.sendPacketAndGetReply(
-                            newHealthCheckIQ(bridgeJid));
+                    response
+                        = connection.sendPacketAndGetReply(
+                                newHealthCheckIQ(bridgeJid));
                 }
                 catch (InterruptedException e)
                 {
@@ -481,36 +513,27 @@ public class JvbDoctor
                         "Health check response from: " + bridgeJid + ": "
                             + IQUtils.responseToXML(response));
 
-                if (!(response instanceof IQ))
+                if (response == null)
                 {
-                    if (response != null)
-                    {
-                        logger.error("Response not an IQ: " + response.toXML());
-                    }
-                    else
-                    {
-                        notifyHealthCheckFailed(bridgeJid, null);
-                    }
+                    notifyHealthCheckFailed(bridgeJid, null);
                     return;
                 }
 
-                IQ responseIQ = (IQ) response;
-                IQ.Type responseType = responseIQ.getType();
-
-                if (IQ.Type.RESULT.equals(responseType))
+                IQ.Type responseType = response.getType();
+                if (IQ.Type.result.equals(responseType))
                 {
                     // OK
                     return;
                 }
 
-                if (IQ.Type.ERROR.equals(responseType))
+                if (IQ.Type.error.equals(responseType))
                 {
-                    XMPPError error = responseIQ.getError();
-                    String condition = error.getCondition();
+                    XMPPError error = response.getError();
+                    XMPPError.Condition condition = error.getCondition();
 
-                    if (XMPPError.Condition.interna_server_error.toString()
+                    if (XMPPError.Condition.internal_server_error
                             .equals(condition)
-                        || XMPPError.Condition.service_unavailable.toString()
+                        || XMPPError.Condition.service_unavailable
                             .equals(condition))
                     {
                         // Health check failure

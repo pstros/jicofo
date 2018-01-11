@@ -29,9 +29,11 @@ import net.java.sip.communicator.util.*;
 import org.jitsi.impl.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.util.*;
-import org.jivesoftware.smack.*;
-import org.jivesoftware.smack.filter.*;
 import org.jivesoftware.smack.packet.*;
+import org.jivesoftware.smack.packet.id.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
+import org.jxmpp.stringprep.*;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -40,8 +42,6 @@ import java.util.concurrent.*;
  *
  */
 public class MockParticipant
-    implements PacketListener,
-               PacketFilter
 {
     /**
      * The logger.
@@ -59,7 +59,7 @@ public class MockParticipant
 
     private MockRoomMember user;
 
-    private MockXmppConnection mockConnection;
+    private XmppConnection mockConnection;
 
     private UtilityJingleOpSet jingle;
 
@@ -69,9 +69,9 @@ public class MockParticipant
 
     private final Object joinLock = new Object();
 
-    private MediaSSRCMap remoteSSRCs = new MediaSSRCMap();
+    private MediaSourceMap remoteSSRCs = new MediaSourceMap();
 
-    private MediaSSRCGroupMap remoteSSRCgroups = new MediaSSRCGroupMap();
+    private MediaSourceGroupMap remoteSSRCgroups = new MediaSourceGroupMap();
 
     private HashMap<String, IceUdpTransportPacketExtension> transportMap;
 
@@ -79,13 +79,13 @@ public class MockParticipant
 
     private JingleHandler jingleHandler = new JingleHandler();
 
-    private String myJid;
+    private Jid myJid;
 
-    private String remoteJid;
+    private Jid remoteJid;
 
-    private MediaSSRCMap localSSRCs = new MediaSSRCMap();
+    private MediaSourceMap localSSRCs = new MediaSourceMap();
 
-    private MediaSSRCGroupMap localSSRCGroups = new MediaSSRCGroupMap();
+    private MediaSourceGroupMap localSSRCGroups = new MediaSourceGroupMap();
 
     private String ssrcVideoType = SSRCInfoPacketExtension.CAMERA_VIDEO_TYPE;
 
@@ -145,36 +145,37 @@ public class MockParticipant
 
     public void join(MockMultiUserChat chat)
     {
-        user = chat.createMockRoomMember(nick);
+        try
+        {
+            user = chat.createMockRoomMember(nick);
+        }
+        catch (XmppStringprepException e)
+        {
+            throw new RuntimeException(e);
+        }
 
         user.setupFeatures(useBundle);
 
-        MockProtocolProvider protocolProvider
-            = (MockProtocolProvider)chat.getParentProvider();
 
-        mockConnection = protocolProvider.getMockXmppConnection();
+        try
+        {
+            myJid = JidCreate.entityFullFrom(chat.getName() + "/" + user.getName());
+        }
+        catch (XmppStringprepException e)
+        {
+            throw new RuntimeException(e);
+        }
 
-        OperationSetDirectSmackXmpp smackOpSet
-            = protocolProvider.getOperationSet(
-                    OperationSetDirectSmackXmpp.class);
-
-        myJid = chat.getName() + "/" + user.getName();
-
-        this.jingle = new UtilityJingleOpSet(myJid, mockConnection, smackOpSet);
-
-        jingle.init();
-
-        mockConnection.addPacketHandler(this, this);
+        mockConnection = new MockXmppConnection(myJid);
+        jingle = new UtilityJingleOpSet(mockConnection);
+        jingle.mockParticipant = this;
+        mockConnection.registerIQRequestHandler(jingle);
 
         chat.mockJoin(user);
-
         synchronized (joinLock)
         {
-            xmppPeer = new XmppPeer(
-                user.getContactAddress(), mockConnection);
-
+            xmppPeer = new XmppPeer(user.getJabberID(), mockConnection);
             xmppPeer.start();
-
             joinLock.notifyAll();
         }
     }
@@ -200,7 +201,7 @@ public class MockParticipant
 
     private void initContents()
     {
-        myContents = new ArrayList<ContentPacketExtension>();
+        myContents = new ArrayList<>();
 
         // AUDIO
         ContentPacketExtension audio = new ContentPacketExtension();
@@ -213,7 +214,7 @@ public class MockParticipant
 
         addLocalAudioSSRC(nextSSRC());
 
-        for (SourcePacketExtension ssrc : localSSRCs.getSSRCsForMedia("audio"))
+        for (SourcePacketExtension ssrc : localSSRCs.getSourcesForMedia("audio"))
         {
             audioRtpDesc.addChildExtension(ssrc);
         }
@@ -245,7 +246,7 @@ public class MockParticipant
         if (useSsrcGroups)
         {
             // Video SSRC group
-            SSRCGroup videoGroup = getLocalSSRCGroup("video");
+            SourceGroup videoGroup = getLocalSSRCGroup("video");
             videoGroup.addSources(getVideoSSRCS());
 
             videoRtpDesc.addChildExtension(videoGroup.getExtensionCopy());
@@ -268,6 +269,7 @@ public class MockParticipant
                 catch (InterruptedException e)
                 {
                     logger.error(e, e);
+                    Thread.currentThread().interrupt();
                 }
             }
         },"Accept invite " + nick).start();
@@ -286,7 +288,7 @@ public class MockParticipant
 
         // ACK invite
         IQ inviteAck = JingleIQ.createResultIQ(invite);
-        mockConnection.sendPacket(inviteAck);
+        mockConnection.sendStanza(inviteAck);
 
         initContents();
 
@@ -296,7 +298,7 @@ public class MockParticipant
 
         logger.info(nick + " accept: " + user1Accept.toXML());
 
-        mockConnection.sendPacket(user1Accept);
+        mockConnection.sendStanza(user1Accept);
 
         this.myJid = user1Accept.getFrom();
         this.remoteJid = user1Accept.getTo();
@@ -315,8 +317,7 @@ public class MockParticipant
     private Map<String, IceUdpTransportPacketExtension> createTransportMap(
             JingleIQ user1Invite)
     {
-        this.transportMap
-            = new HashMap<String, IceUdpTransportPacketExtension>();
+        this.transportMap = new HashMap<>();
 
         for (ContentPacketExtension content : user1Invite.getContentList())
         {
@@ -368,6 +369,7 @@ public class MockParticipant
 
             fakeCandidate.setIP("127.0.0.1");
             fakeCandidate.setPort(60000);
+            fakeCandidate.setType(CandidateType.host);
 
             iceTransport.addCandidate(fakeCandidate);
         }
@@ -376,8 +378,7 @@ public class MockParticipant
 
     public JingleIQ sendTransportInfo()
     {
-        List<ContentPacketExtension> contents
-            = new ArrayList<ContentPacketExtension>();
+        List<ContentPacketExtension> contents = new ArrayList<>();
 
         for (ContentPacketExtension myContent : myContents)
         {
@@ -405,7 +406,7 @@ public class MockParticipant
             = JinglePacketFactory.createTransportInfo(
                 myJid, remoteJid, jingleSession.getSessionID(), contents);
 
-        mockConnection.sendPacket(transportInfoIq);
+        mockConnection.sendStanza(transportInfoIq);
 
         return transportInfoIq;
     }
@@ -414,14 +415,12 @@ public class MockParticipant
             JingleIQ sessionInit,
             Map<String, IceUdpTransportPacketExtension> transportMap)
     {
-        JingleIQ accept = new JingleIQ();
+        JingleIQ accept = new JingleIQ(
+                JingleAction.SESSION_ACCEPT,
+                sessionInit.getSID());
 
-        accept.setPacketID(Packet.nextID());
-        accept.setType(IQ.Type.SET);
-
-        accept.setAction(JingleAction.SESSION_ACCEPT);
-
-        accept.setSID(sessionInit.getSID());
+        accept.setStanzaId(StanzaIdUtil.newStanzaId());
+        accept.setType(IQ.Type.set);
         accept.setFrom(sessionInit.getTo());
         accept.setTo(sessionInit.getFrom());
 
@@ -461,39 +460,24 @@ public class MockParticipant
         return nick;
     }
 
-    @Override
-    public boolean accept(Packet packet)
-    {
-        boolean isJingle
-            = user.getContactAddress().equals(packet.getTo())
-                    && packet instanceof JingleIQ;
-
-        if (!isJingle)
-            return false;
-
-        JingleIQ jingleIQ = (JingleIQ) packet;
-        return JingleAction.SOURCEADD.equals(jingleIQ.getAction())
-            || JingleAction.SOURCEREMOVE.equals(jingleIQ.getAction());
-    }
-
-    @Override
-    public void processPacket(Packet packet)
+    public void processStanza(IQ packet)
     {
         JingleIQ modifySSRcIq = (JingleIQ) packet;
         JingleAction action = modifySSRcIq.getAction();
 
-        if (JingleAction.SOURCEADD.equals(action))
+        if (JingleAction.SOURCEADD.equals(action)
+                || JingleAction.ADDSOURCE.equals(action))
         {
             synchronized (sourceLock)
             {
-                MediaSSRCMap ssrcMap
-                    = MediaSSRCMap.getSSRCsFromContent(
+                MediaSourceMap ssrcMap
+                    = MediaSourceMap.getSourcesFromContent(
                             modifySSRcIq.getContentList());
 
                 remoteSSRCs.add(ssrcMap);
 
-                MediaSSRCGroupMap ssrcGroupMap
-                    = MediaSSRCGroupMap.getSSRCGroupsForContents(
+                MediaSourceGroupMap ssrcGroupMap
+                    = MediaSourceGroupMap.getSourceGroupsForContents(
                             modifySSRcIq.getContentList());
 
                 remoteSSRCgroups.add(ssrcGroupMap);
@@ -512,18 +496,19 @@ public class MockParticipant
                 sourceLock.notifyAll();
             }
         }
-        else if (JingleAction.SOURCEREMOVE.equals(action))
+        else if (JingleAction.SOURCEREMOVE.equals(action)
+                || JingleAction.REMOVESOURCE.equals(action))
         {
             synchronized (sourceLock)
             {
-                MediaSSRCMap ssrcsToRemove
-                    = MediaSSRCMap.getSSRCsFromContent(
+                MediaSourceMap ssrcsToRemove
+                    = MediaSourceMap.getSourcesFromContent(
                             modifySSRcIq.getContentList());
 
                 remoteSSRCs.remove(ssrcsToRemove);
 
-                MediaSSRCGroupMap ssrcGroupsToRemove
-                    = MediaSSRCGroupMap.getSSRCGroupsForContents(
+                MediaSourceGroupMap ssrcGroupsToRemove
+                    = MediaSourceGroupMap.getSourceGroupsForContents(
                             modifySSRcIq.getContentList());
 
                 remoteSSRCgroups.remove(ssrcGroupsToRemove);
@@ -547,8 +532,8 @@ public class MockParticipant
 
     public void switchVideoSSRCs(long[] newVideoSSRCs, boolean useSsrcGroups)
     {
-        MediaSSRCMap toRemove = new MediaSSRCMap();
-        toRemove.addSSRCs("video", localSSRCs.getSSRCsForMedia("video"));
+        MediaSourceMap toRemove = new MediaSourceMap();
+        toRemove.addSources("video", localSSRCs.getSourcesForMedia("video"));
 
         // Send source-remove
         jingle.sendRemoveSourceIQ(
@@ -556,16 +541,16 @@ public class MockParticipant
 
         // Remove old ssrcs(and clear groups)
         localSSRCs.remove(toRemove);
-        localSSRCGroups = new MediaSSRCGroupMap();
+        localSSRCGroups = new MediaSourceGroupMap();
 
         videoSourceAdd(newVideoSSRCs, useSsrcGroups);
     }
 
-    private SSRCGroup getLocalSSRCGroup(String media)
+    private SourceGroup getLocalSSRCGroup(String media)
     {
-        List<SSRCGroup> videoGroups
-            = localSSRCGroups.getSSRCGroupsForMedia(media);
-        SSRCGroup group = null;
+        List<SourceGroup> videoGroups
+            = localSSRCGroups.getSourceGroupsForMedia(media);
+        SourceGroup group = null;
         if (videoGroups.size() > 0)
         {
             group = videoGroups.get(0);
@@ -575,9 +560,9 @@ public class MockParticipant
             SourceGroupPacketExtension ssrcGroup
                 = SourceGroupPacketExtension.createSimulcastGroup();
 
-            group = new SSRCGroup(ssrcGroup);
+            group = new SourceGroup(ssrcGroup);
 
-            localSSRCGroups.addSSRCGroup(media, group);
+            localSSRCGroups.addSourceGroup(media, group);
         }
         return group;
     }
@@ -614,8 +599,8 @@ public class MockParticipant
     {
         List<SourcePacketExtension> addedSSRCs
             = new ArrayList<>(newSSRCs.length);
-        MediaSSRCMap toAdd = new MediaSSRCMap();
-        SSRCGroup ssrcGroup = getLocalSSRCGroup(media);
+        MediaSourceMap toAdd = new MediaSourceMap();
+        SourceGroup sourceGroup = getLocalSSRCGroup(media);
 
         // Create new SSRCs
         for (int i=0; i<newSSRCs.length; i++)
@@ -629,12 +614,12 @@ public class MockParticipant
             SourcePacketExtension ssrcPe
                 = addLocalSSRC(media, newSSRCs[i], videoType);
 
-            toAdd.addSSRC(media, ssrcPe);
+            toAdd.addSource(media, ssrcPe);
             addedSSRCs.add(ssrcPe);
 
             if (useSsrcGroups)
             {
-                ssrcGroup.addSource(ssrcPe);
+                sourceGroup.addSource(ssrcPe);
             }
         }
 
@@ -646,12 +631,12 @@ public class MockParticipant
 
     public List<SourcePacketExtension> getRemoteSSRCs(String media)
     {
-        return remoteSSRCs.getSSRCsForMedia(media);
+        return remoteSSRCs.getSourcesForMedia(media);
     }
 
-    public List<SSRCGroup> getRemoteSSRCGroups(String media)
+    public List<SourceGroup> getRemoteSSRCGroups(String media)
     {
-        return remoteSSRCgroups.getSSRCGroupsForMedia(media);
+        return remoteSSRCgroups.getSourceGroupsForMedia(media);
     }
 
     public JingleIQ waitForAddSource(long timeout)
@@ -700,14 +685,14 @@ public class MockParticipant
         this.useSsrcGroups = useSsrcGroups;
     }
 
-    public String getMyJid()
+    public Jid getMyJid()
     {
         return myJid;
     }
 
     public List<SourcePacketExtension> getVideoSSRCS()
     {
-        return localSSRCs.getSSRCsForMedia("video");
+        return localSSRCs.getSourcesForMedia("video");
     }
 
     public String getSsrcVideoType()
@@ -745,7 +730,7 @@ public class MockParticipant
     {
         SourcePacketExtension newSSRC = newSSRC(ssrc, videoType);
 
-        localSSRCs.addSSRC(media, newSSRC);
+        localSSRCs.addSource(media, newSSRC);
 
         return newSSRC;
     }

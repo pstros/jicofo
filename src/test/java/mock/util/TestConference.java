@@ -21,10 +21,13 @@ import mock.*;
 import mock.jvb.*;
 import mock.muc.*;
 
+import mock.xmpp.*;
 import org.jitsi.impl.neomedia.rtp.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.osgi.*;
 
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
 import org.osgi.framework.*;
 
 import java.util.*;
@@ -38,24 +41,24 @@ public class TestConference
 
     private String serverName;
 
-    private String roomName;
+    private EntityBareJid roomName;
 
     private final OSGIServiceRef<JitsiMeetServices> meetServicesRef;
 
-    private String mockBridgeJid;
+    private Jid mockBridgeJid;
 
     private final OSGIServiceRef<FocusManager> focusManagerRef;
 
     private MockProtocolProvider focusProtocolProvider;
 
-    private JitsiMeetConference conference;
+    public JitsiMeetConferenceImpl conference;
 
     private MockVideobridge mockBridge;
 
     private MockMultiUserChat chat;
 
     static public TestConference allocate(
-        BundleContext ctx, String serverName, String roomName)
+        BundleContext ctx, String serverName, EntityBareJid roomName)
         throws Exception
     {
         TestConference newConf = new TestConference(ctx);
@@ -66,7 +69,7 @@ public class TestConference
     }
 
     static public TestConference allocate(
-        BundleContext ctx, String serverName, String roomName,
+        BundleContext ctx, String serverName, EntityBareJid roomName,
         MockVideobridge mockBridge)
         throws Exception
     {
@@ -85,14 +88,14 @@ public class TestConference
         this.focusManagerRef = new OSGIServiceRef<>(osgi, FocusManager.class);
     }
 
-    private void createJvbAndConference(String serverName, String roomName)
+    private void createJvbAndConference(String serverName, EntityBareJid roomName)
         throws Exception
     {
-        this.mockBridgeJid = "mockjvb." + serverName;
+        this.mockBridgeJid = JidCreate.domainBareFrom("mockjvb." + serverName);
 
         MockVideobridge mockBridge
             = new MockVideobridge(
-                    getFocusProtocolProvider().getMockXmppConnection(),
+                    new MockXmppConnection(mockBridgeJid),
                     mockBridgeJid);
 
         mockBridge.start(bc);
@@ -108,7 +111,7 @@ public class TestConference
         mockBridge.stop(bc);
     }
 
-    private void createConferenceRoom(String serverName, String roomName,
+    private void createConferenceRoom(String serverName, EntityBareJid roomName,
                                       MockVideobridge mockJvb)
         throws Exception
     {
@@ -126,7 +129,7 @@ public class TestConference
         MockMultiUserChatOpSet mucOpSet
             = getFocusProtocolProvider().getMockChatOpSet();
 
-        this.chat = (MockMultiUserChat) mucOpSet.findRoom(roomName);
+        this.chat = (MockMultiUserChat) mucOpSet.findRoom(roomName.toString());
     }
 
     public MockProtocolProvider getFocusProtocolProvider()
@@ -165,10 +168,10 @@ public class TestConference
         return new ConferenceUtility(conference);
     }
 
-    public long[] getSimulcastLayersSSRCs(String peerJid)
+    public long[] getSimulcastLayersSSRCs(Jid peerJid)
     {
         ConferenceUtility confUtility = getConferenceUtility();
-        String conferenceId = confUtility.getJvbConferenceId();
+        String conferenceId = conference.getJvbConferenceId();
         String videoChannelId
             = confUtility.getParticipantVideoChannelId(peerJid);
         List<RTPEncodingDesc> layers
@@ -188,7 +191,7 @@ public class TestConference
         return conference.getParticipantCount();
     }
 
-    public String getRoomName()
+    public EntityBareJid getRoomName()
     {
         return roomName;
     }

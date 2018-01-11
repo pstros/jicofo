@@ -21,10 +21,14 @@ import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
 import net.java.sip.communicator.impl.protocol.jabber.extensions.jitsimeet.*;
 
+import org.jitsi.jicofo.*;
 import org.jitsi.service.neomedia.*;
 import org.jitsi.util.*;
 
 import org.jivesoftware.smack.packet.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
+import org.jxmpp.stringprep.*;
 
 import java.util.*;
 
@@ -42,7 +46,20 @@ public class SSRCSignaling
      * The constant value used as owner attribute value of
      * {@link SSRCInfoPacketExtension} for the SSRC which belongs to the JVB.
      */
-    public static final String SSRC_OWNER_JVB = "jvb";
+    public static final Jid SSRC_OWNER_JVB;
+
+    static
+    {
+        try
+        {
+            SSRC_OWNER_JVB = JidCreate.from("jvb");
+        }
+        catch (XmppStringprepException e)
+        {
+            // cannot happen
+            throw new RuntimeException(e);
+        }
+    }
 
     /**
      * Copies value of "<parameter>" SSRC child element. The parameter to be
@@ -66,17 +83,73 @@ public class SSRCSignaling
     }
 
     /**
-     * Call will remove all {@link ParameterPacketExtension}s from all
-     * <tt>SourcePacketExtension</tt>s stored in given <tt>MediaSSRCMap</tt>.
+     * Replaces all instances of {@link SourcePacketExtension}s held by
+     * {@link SourceGroupPacketExtension}s in the given
+     * {@link MediaSourceGroupMap} with the corresponding ones from the given
+     * {@link MediaSourceMap}<tt></tt>.
      *
-     * @param ssrcMap the <tt>MediaSSRCMap</tt> which contains the SSRC packet
+     * @param groups <tt>MediaSourceGroupMap</tt>
+     * @param sources <tt>MediaSourceMap</tt>
+     *
+     * @throws InvalidSSRCsException if there's no corresponding
+     * {@link SourcePacketExtension} found in the <tt>sources</tt> for any
+     * source in the <tt>groups</tt>.
+     */
+    static public void copySourceParamsToGroups(
+            MediaSourceGroupMap    groups,
+            MediaSourceMap         sources)
+        throws InvalidSSRCsException
+    {
+        for (String mediaType : groups.getMediaTypes())
+        {
+            List<SourceGroup> mediaGroups
+                = groups.getSourceGroupsForMedia(mediaType);
+            List<SourceGroup> newMediaGroups
+                = new ArrayList<>(mediaGroups.size());
+
+            for (SourceGroup group : mediaGroups)
+            {
+                List<SourcePacketExtension> groupSources = group.getSources();
+                List<SourcePacketExtension> newSources
+                    = new ArrayList<>(groupSources.size());
+
+                for (SourcePacketExtension srcInGroup : groupSources)
+                {
+                    SourcePacketExtension sourceInMedia
+                        = sources.findSource(mediaType, srcInGroup);
+
+                    if (sourceInMedia == null)
+                    {
+                        throw new InvalidSSRCsException(
+                                "Source " + srcInGroup
+                                    + " not found in '" + mediaType
+                                    + "' for group: " + group);
+                    }
+
+                    newSources.add(sourceInMedia);
+                }
+
+                newMediaGroups.add(
+                        new SourceGroup(group.getSemantics(), newSources));
+            }
+
+            mediaGroups.clear();
+            mediaGroups.addAll(newMediaGroups);
+        }
+    }
+
+    /**
+     * Call will remove all {@link ParameterPacketExtension}s from all
+     * <tt>SourcePacketExtension</tt>s stored in given <tt>MediaSourceMap</tt>.
+     *
+     * @param ssrcMap the <tt>MediaSourceMap</tt> which contains the SSRC packet
      * extensions to be stripped out of their parameters.
      */
-    public static void deleteSSRCParams(MediaSSRCMap ssrcMap)
+    public static void deleteSSRCParams(MediaSourceMap ssrcMap)
     {
         for (String media : ssrcMap.getMediaTypes())
         {
-            for (SourcePacketExtension ssrc : ssrcMap.getSSRCsForMedia(media))
+            for (SourcePacketExtension ssrc : ssrcMap.getSourcesForMedia(media))
             {
                 deleteSSRCParams(ssrc);
             }
@@ -92,7 +165,7 @@ public class SSRCSignaling
      */
     private static void deleteSSRCParams(SourcePacketExtension ssrcPe)
     {
-        List<? extends PacketExtension> peList = ssrcPe.getChildExtensions();
+        List<? extends ExtensionElement> peList = ssrcPe.getChildExtensions();
         peList.removeAll(ssrcPe.getParameters());
     }
 
@@ -136,6 +209,25 @@ public class SSRCSignaling
     }
 
     /**
+     * Obtains the MSID attribute value of given {@link SourcePacketExtension}.
+     * @param source {@link SourcePacketExtension}
+     * @return <tt>String</tt> value of the MSID attribute of given source
+     * extension or <tt>null</tt> if it's either empty or not present.
+     */
+    public static String getMsid(SourcePacketExtension source)
+    {
+        ParameterPacketExtension msid = getParam(source, "msid");
+        if (msid != null && !StringUtils.isNullOrEmpty(msid.getValue()))
+        {
+            return msid.getValue();
+        }
+        else
+        {
+            return null;
+        }
+    }
+
+    /**
      * Obtains <tt>ParameterPacketExtension</tt> for given name(if it exists).
      * @param ssrc the <tt>SourcePacketExtension</tt> to be searched for
      *             parameter
@@ -161,7 +253,7 @@ public class SSRCSignaling
      *               want to find an owner.
      * @return MUC jid of the user who own this SSRC.
      */
-    public static String getSSRCOwner(SourcePacketExtension ssrcPe)
+    public static Jid getSSRCOwner(SourcePacketExtension ssrcPe)
     {
         SSRCInfoPacketExtension ssrcInfo
             = ssrcPe.getFirstChildOfType(SSRCInfoPacketExtension.class);
@@ -177,12 +269,12 @@ public class SSRCSignaling
      */
     public static String getStreamId(SourcePacketExtension ssrc)
     {
-        ParameterPacketExtension msid = getParam(ssrc, "msid");
+        String msid = getMsid(ssrc);
 
-        if (msid == null || StringUtils.isNullOrEmpty(msid.getValue()))
+        if (msid == null)
             return null;
 
-        String[] streamAndTrack = msid.getValue().split(" ");
+        String[] streamAndTrack = msid.split(" ");
         String streamId = streamAndTrack.length == 2 ? streamAndTrack[0] : null;
         if (streamId != null) {
             streamId = streamId.trim();
@@ -201,12 +293,12 @@ public class SSRCSignaling
      */
     private static String getTrackId(SourcePacketExtension ssrc)
     {
-        ParameterPacketExtension msid = getParam(ssrc, "msid");
+        String msid = getMsid(ssrc);
 
-        if (msid == null || StringUtils.isNullOrEmpty(msid.getValue()))
+        if (msid == null)
             return null;
 
-        String[] streamAndTrack = msid.getValue().split(" ");
+        String[] streamAndTrack = msid.split(" ");
         String trackId = streamAndTrack.length == 2 ? streamAndTrack[1] : null;
         if (trackId != null) {
             trackId = trackId.trim();
@@ -227,7 +319,7 @@ public class SSRCSignaling
 
     /**
      * Merges the first valid video stream into the first valid audio stream
-     * described in <tt>MediaSSRCMap</tt>. A valid media stream is the one that
+     * described in <tt>MediaSourceMap</tt>. A valid media stream is the one that
      * has well defined "stream ID" as in the description of
      * {@link #getFirstWithMSID(List)} method.
      *
@@ -236,10 +328,10 @@ public class SSRCSignaling
      * @return <tt>true</tt> if the streams have been merged or <tt>false</tt>
      * otherwise.
      */
-    public static boolean mergeVideoIntoAudio(MediaSSRCMap peerSSRCs)
+    public static boolean mergeVideoIntoAudio(MediaSourceMap peerSSRCs)
     {
         List<SourcePacketExtension> audioSSRCs
-            = peerSSRCs.getSSRCsForMedia(MediaType.AUDIO.toString());
+            = peerSSRCs.getSourcesForMedia(MediaType.AUDIO.toString());
 
         // We want to sync video stream with the first valid audio stream
         SourcePacketExtension audioSSRC = getFirstWithMSID(audioSSRCs);
@@ -257,7 +349,7 @@ public class SSRCSignaling
         // Find first video SSRC with non-empty stream ID and different
         // than 'default' which is sometimes used when unspecified
         List<SourcePacketExtension> videoSSRCs
-            = peerSSRCs.getSSRCsForMedia(MediaType.VIDEO.toString());
+            = peerSSRCs.getSourcesForMedia(MediaType.VIDEO.toString());
 
         boolean merged = false;
         // There are multiple video SSRCs in simulcast
@@ -290,41 +382,78 @@ public class SSRCSignaling
      *
      * @param contents the Jingle contents list that describes media SSRCs.
      *
-     * @return a <tt>Map<String,MediaSSRCMap></tt> which is the SSRC to owner
+     * @return a <tt>Map<String,MediaSourceMap></tt> which is the SSRC to owner
      *         mapping of the SSRCs contained in given Jingle content list.
      *         An owner comes form the {@link SSRCInfoPacketExtension} included
      *         as a child of the {@link SourcePacketExtension}.
      */
-    public static Map<String, MediaSSRCMap> ownerMapping(
+    public static Map<Jid, MediaSourceMap> ownerMapping(
             List<ContentPacketExtension> contents)
     {
-        Map<String, MediaSSRCMap> ownerMapping = new HashMap<>();
+        Map<Jid, MediaSourceMap> ownerMapping = new HashMap<>();
         for (ContentPacketExtension content : contents)
         {
             String media = content.getName();
-            MediaSSRCMap mediaSSRCMap
-                = MediaSSRCMap.getSSRCsFromContent(contents);
+            MediaSourceMap mediaSourceMap
+                = MediaSourceMap.getSourcesFromContent(contents);
 
             for (SourcePacketExtension ssrc
-                    : mediaSSRCMap.getSSRCsForMedia(media))
+                    : mediaSourceMap.getSourcesForMedia(media))
             {
-                String owner = getSSRCOwner(ssrc);
-                MediaSSRCMap ownerMap = ownerMapping.get(owner);
+                Jid owner = getSSRCOwner(ssrc);
+                MediaSourceMap ownerMap = ownerMapping.get(owner);
 
                 // Create if not found
                 if (ownerMap == null)
                 {
-                    ownerMap = new MediaSSRCMap();
+                    ownerMap = new MediaSourceMap();
                     ownerMapping.put(owner, ownerMap);
                 }
 
-                ownerMap.addSSRC(media, ssrc);
+                ownerMap.addSource(media, ssrc);
             }
         }
         return ownerMapping;
     }
 
-    public static void setSSRCOwner(SourcePacketExtension ssrcPe, String owner)
+    /**
+     * From the given list of {@link SourceGroup}s select those that share
+     * the given MSID value.
+     *
+     * @param groups a {@link List} of {@link SourceGroup} to be filtered out.
+     * @param groupMsid a {@link String} with the MSID value to be used as
+     *        selector.
+     *
+     * @return a {@link List} of {@link SourceGroup}.
+     */
+    public static List<SourceGroup> selectWithMsid(
+        List<SourceGroup>    groups,
+        String               groupMsid)
+    {
+        if (StringUtils.isNullOrEmpty(groupMsid))
+        {
+            throw new IllegalArgumentException("Null or empty 'groupMsid'");
+        }
+
+        // FIXME change once migrated to Java 8
+        // return groups.stream()
+        //     .filter(group -> group.getGroupMsid().equalsIgnoreCase(groupMsid)
+        //     .collect(Collectors.toList());
+
+        List<SourceGroup> result = new LinkedList<>();
+
+        for (SourceGroup group : groups)
+        {
+            if (groupMsid.equalsIgnoreCase(group.getGroupMsid()))
+            {
+                result.add(group);
+            }
+        }
+
+        return result;
+    }
+
+    public static void setSSRCOwner(SourcePacketExtension ssrcPe, Jid owner)
     {
         SSRCInfoPacketExtension ssrcInfo
             = ssrcPe.getFirstChildOfType(SSRCInfoPacketExtension.class);
