@@ -326,10 +326,10 @@ public class MediaSSRCMap
                 ssrcPe = content.getChildExtensionsOfType(
                     SourcePacketExtension.class);
             }
-
-            classLogger.info("keyframe - getSSRCsFromContent - putting " + media + " into map ssrc: " + ssrcPe.toString());
+            
             if (ssrcMap.get(media) == null || ssrcMap.get(media).size() > 0)
             {
+                classLogger.info("keyframe - getSSRCsFromContent - putting " + media + " into map ssrc: " + ssrcPe.toString());
                 ssrcMap.put(media, ssrcPe);
             } else {
                 classLogger.info("keyframe - getSSRCsFromContent - skipping adding "
