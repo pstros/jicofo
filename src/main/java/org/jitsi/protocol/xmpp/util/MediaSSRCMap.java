@@ -328,8 +328,13 @@ public class MediaSSRCMap
             }
 
             classLogger.info("keyframe - getSSRCsFromContent - putting " + media + " into map ssrc: " + ssrcPe.toString());
-
-            ssrcMap.put(media, ssrcPe);
+            if (ssrcMap.get(media) == null || ssrcMap.get(media).size() > 0)
+            {
+                ssrcMap.put(media, ssrcPe);
+            } else {
+                classLogger.info("keyframe - getSSRCsFromContent - skipping adding "
+                    + media + " with " + ssrcPe.toString() + " because it already exists " + ssrcMap.get(media));
+            }
         }
 
         return new MediaSSRCMap(ssrcMap);
