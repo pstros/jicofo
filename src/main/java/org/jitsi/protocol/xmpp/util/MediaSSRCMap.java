@@ -67,7 +67,6 @@ public class MediaSSRCMap
     public List<SourcePacketExtension> getSSRCsForMedia(String media)
     {
         List<SourcePacketExtension> ssrcList = ssrcs.get(media);
-        classLogger.info("keyframe - getSSRCsForMedia ssrcList size: " + ssrcList.size());
         if (ssrcList == null)
         {
             // Prevent concurrent modification exception,
@@ -75,6 +74,7 @@ public class MediaSSRCMap
             ssrcList = new CopyOnWriteArrayList<>();
             ssrcs.put(media, ssrcList);
         }
+        classLogger.info("keyframe - getSSRCsForMedia ssrcList size: " + ssrcList.size());
         return ssrcList;
     }
 
