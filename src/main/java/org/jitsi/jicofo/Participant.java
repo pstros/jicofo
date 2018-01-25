@@ -222,14 +222,15 @@ public class Participant
     {
         Map<String, RtpDescriptionPacketExtension> rtpDescMap = new HashMap<>();
 
-        logger.info("keyframe - content list" + jingleContents.size());
+        logger.info("keyframe - setRTPDescription - content list" + jingleContents.size());
         for (ContentPacketExtension content : jingleContents)
         {
+            logger.info("keyframe - setRTPDescription - content: ", content.toString());
             RtpDescriptionPacketExtension rtpDesc
                 = content.getFirstChildOfType(
                         RtpDescriptionPacketExtension.class);
 
-            logger.info("keyframe - adding to rtpmap: " + content.getName() + " = " + rtpDesc);            
+            logger.info("keyframe - setRTPDescription - adding to rtpmap: " + content.getName() + " = " + rtpDesc);            
             if (rtpDesc != null)
             {
                 rtpDescMap.put(content.getName(), rtpDesc);

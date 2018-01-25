@@ -31,6 +31,7 @@ import java.util.concurrent.*;
  */
 public class MediaSSRCMap
 {
+    private final static Logger classLogger = Logger.getLogger(MediaSSRCMap.class);
     /**
      * The media SSRC map storage.
      */
@@ -65,6 +66,7 @@ public class MediaSSRCMap
     public List<SourcePacketExtension> getSSRCsForMedia(String media)
     {
         List<SourcePacketExtension> ssrcList = ssrcs.get(media);
+        logger.info("keyframe - getSSRCsForMedia ssrcList size: ", sscList.size());
         if (ssrcList == null)
         {
             // Prevent concurrent modification exception,
@@ -311,16 +313,20 @@ public class MediaSSRCMap
             // FIXME: different approach for SourcePacketExtension
             if (rtpDesc != null)
             {
+                logger.info("keyframe - getSSRCsFromContent - get ssrcPe from rtpDesc");
                 media = rtpDesc.getMedia();
                 ssrcPe = rtpDesc.getChildExtensionsOfType(
                     SourcePacketExtension.class);
             }
             else
             {
+                logger.info("keyframe - getSSRCsFromContent - get ssrcPe from content");
                 media = content.getName();
                 ssrcPe = content.getChildExtensionsOfType(
                     SourcePacketExtension.class);
             }
+
+            logger.info("keyframe - getSSRCsFromContent - putting " + media + " into map ssrc: " + ssrcPe.toString());
 
             ssrcMap.put(media, ssrcPe);
         }
