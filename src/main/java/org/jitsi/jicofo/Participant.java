@@ -222,12 +222,14 @@ public class Participant
     {
         Map<String, RtpDescriptionPacketExtension> rtpDescMap = new HashMap<>();
 
+        logger.info("keyframe - content list" + jingleContents.size());
         for (ContentPacketExtension content : jingleContents)
         {
             RtpDescriptionPacketExtension rtpDesc
                 = content.getFirstChildOfType(
                         RtpDescriptionPacketExtension.class);
 
+            logger.info("keyframe - adding to rtpmap: " + content.getName() + " = " + rtpDesc);            
             if (rtpDesc != null)
             {
                 rtpDescMap.put(content.getName(), rtpDesc);
@@ -523,6 +525,8 @@ public class Participant
 
         MediaSSRCMap ssrcsToAdd
             = MediaSSRCMap.getSSRCsFromContent(contents);
+
+        logger.info("keyframe - addSSRCAndGroupsFromContent ssrcToAdd: " + ssrcsToAdd.toString());
         MediaSSRCGroupMap groupsToAdd
             = MediaSSRCGroupMap.getSSRCGroupsForContents(contents);
 
@@ -539,7 +543,7 @@ public class Participant
                 = addedSSRCs.getSSRCsForMedia(mediaType);
             for (SourcePacketExtension ssrc : ssrcs)
             {
-                logger.info("adding owner for " + mediaType + " ssrc " + ssrc.toString());
+                logger.info("keyframe - adding owner for " + mediaType + " ssrc " + ssrc.toString());
                 SSRCSignaling.setSSRCOwner(ssrc, roomJid);
             }
         }
