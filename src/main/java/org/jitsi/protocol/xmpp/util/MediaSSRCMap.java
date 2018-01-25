@@ -22,6 +22,7 @@ import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.logging.*;
 
 /**
  * The map of media <tt>SourcePacketExtension</tt> encapsulates various
@@ -31,7 +32,7 @@ import java.util.concurrent.*;
  */
 public class MediaSSRCMap
 {
-    private final static Logger classLogger = Logger.getLogger(MediaSSRCMap.class);
+    private final static Logger classLogger = Logger.getLogger(MediaSSRCMap.class.getName());
     /**
      * The media SSRC map storage.
      */
