@@ -127,9 +127,11 @@ public class SSRCValidator
             List<SourcePacketExtension> mediaSsrcs
                 = newSSRCs.getSSRCsForMedia(mediaType);
 
+            logger.info("validator mediaSsrcs size: " + mediaSsrcs.size()); 
             for (SourcePacketExtension ssrcPe : mediaSsrcs)
             {
                 long ssrcValue = ssrcPe.getSSRC();
+                logger.info("validating ssrc: " + ssrcValue);
 
                 // NOTE Technically SSRC == 0 is allowed, but it breaks Chrome
                 if (ssrcValue <= 0L || ssrcValue > 0xFFFFFFFFL)
@@ -161,6 +163,8 @@ public class SSRCValidator
                 SourcePacketExtension copy = ssrcPe.copy();
 
                 filterOutParams(copy);
+
+                logger.info("validator accepted ", copy.toString());
 
                 acceptedSSRCs.addSSRC(mediaType, copy);
                 this.ssrcs.addSSRC(mediaType, copy);

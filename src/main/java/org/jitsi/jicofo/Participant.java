@@ -539,6 +539,7 @@ public class Participant
                 = addedSSRCs.getSSRCsForMedia(mediaType);
             for (SourcePacketExtension ssrc : ssrcs)
             {
+                logger.info("adding owner for " + mediaType + " ssrc " + ssrc.toString());
                 SSRCSignaling.setSSRCOwner(ssrc, roomJid);
             }
         }
