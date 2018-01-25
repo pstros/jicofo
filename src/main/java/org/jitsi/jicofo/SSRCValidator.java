@@ -164,7 +164,7 @@ public class SSRCValidator
 
                 filterOutParams(copy);
 
-                logger.info("validator accepted ", copy.toString());
+                logger.info("validator accepted " + copy.toString());
 
                 acceptedSSRCs.addSSRC(mediaType, copy);
                 this.ssrcs.addSSRC(mediaType, copy);
