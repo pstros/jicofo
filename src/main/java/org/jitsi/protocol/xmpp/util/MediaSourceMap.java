@@ -360,7 +360,14 @@ public class MediaSourceMap
                             rtpDesc.getChildExtensionsOfType(SourcePacketExtension.class) :
                             content.getChildExtensionsOfType(SourcePacketExtension.class);
 
-            mediaSourceMap.put(media, sourcePacketExtensions);
+            // only add sources if there aren't already sources for that media type
+            // this is a workaround for a bug where group content blocks are included in
+            // the contents list being looped through which results in two content blocks
+            // per media type
+            if (mediaSourceMap.get(media) == null || mediaSourceMap.get(media).size() == 0)
+            {
+                mediaSourceMap.put(media, sourcePacketExtensions);
+            }
         }
 
         return new MediaSourceMap(mediaSourceMap);
