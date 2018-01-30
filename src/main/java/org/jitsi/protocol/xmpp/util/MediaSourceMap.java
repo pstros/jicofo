@@ -33,6 +33,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public class MediaSourceMap
 {
+    private final static Logger classLogger
+        = Logger.getLogger(MediaSourceMap.class.getName());
     /**
      * The media source map storage.
      */
@@ -366,7 +368,11 @@ public class MediaSourceMap
             // per media type
             if (mediaSourceMap.get(media) == null || mediaSourceMap.get(media).size() == 0)
             {
+                classLogger.info("keyframe - getSSRCsFromContent - putting " + media + " into map ssrc: " + sourcePacketExtensions.toString());
                 mediaSourceMap.put(media, sourcePacketExtensions);
+            } else {
+                classLogger.info("keyframe - getSSRCsFromContent - skipping adding "
+                    + media + " with " + sourcePacketExtensions.toString() + " because it already exists " + mediaSourceMap.get(media));
             }
         }
 
