@@ -926,7 +926,7 @@ public class ColibriConferenceImpl
 
             boolean send = false;
 
-            logger.info("keyframe - updateChannelsInfo localChannelsInfo: " + localChannelsInfo
+            logger.info("keyframe - updateChannelsInfo localChannelsInfo: " + localChannelsInfo);
 
                 // RTP description
             if (descriptionMap != null)
