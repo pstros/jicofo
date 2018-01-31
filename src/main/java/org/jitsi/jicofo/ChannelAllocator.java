@@ -352,6 +352,7 @@ public class ChannelAllocator implements Runnable
 
         if (!canceled)
         {
+            logger.info("keyframe - createOffer part.setColibriChannelsInfo" + colibriChannels);
             participant.setColibriChannelsInfo(colibriChannels);
 
             craftOffer(contents, colibriChannels);

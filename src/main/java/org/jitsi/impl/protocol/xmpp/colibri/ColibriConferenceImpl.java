@@ -926,11 +926,17 @@ public class ColibriConferenceImpl
 
             boolean send = false;
 
-            // RTP description
+            logger.info("keyframe - updateChannelsInfo localChannelsInfo: " + localChannelsInfo
+
+                // RTP description
             if (descriptionMap != null)
             {
                 for (String contentName : descriptionMap.keySet())
                 {
+                    logger.info("keyframe - updateChannelsInfo content: " + contentName
+                        + ", contentChannelsInfo: " + localChannelsInfo.getContent(contentName)
+                        + ", content channels: " + localChannelsInfo.getContent(contentName)
+                        .getChannels());
                     String channelId
                         = localChannelsInfo.getContent(contentName)
                             .getChannels().get(0).getID();

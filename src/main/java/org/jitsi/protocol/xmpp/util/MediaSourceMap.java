@@ -362,18 +362,20 @@ public class MediaSourceMap
                             rtpDesc.getChildExtensionsOfType(SourcePacketExtension.class) :
                             content.getChildExtensionsOfType(SourcePacketExtension.class);
 
+            classLogger.info("keyframe - getSSRCsFromContent - putting " + media + " into map sources: " + sourcePacketExtensions.toString());
+            mediaSourceMap.put(media, sourcePacketExtensions);
             // only add sources if there aren't already sources for that media type
             // this is a workaround for a bug where group content blocks are included in
             // the contents list being looped through which results in two content blocks
             // per media type
-            if (mediaSourceMap.get(media) == null || mediaSourceMap.get(media).size() == 0)
-            {
-                classLogger.info("keyframe - getSSRCsFromContent - putting " + media + " into map ssrc: " + sourcePacketExtensions.toString());
-                mediaSourceMap.put(media, sourcePacketExtensions);
-            } else {
-                classLogger.info("keyframe - getSSRCsFromContent - skipping adding "
-                    + media + " with " + sourcePacketExtensions.toString() + " because it already exists " + mediaSourceMap.get(media));
-            }
+//            if (mediaSourceMap.get(media) == null || mediaSourceMap.get(media).size() == 0)
+//            {
+//                classLogger.info("keyframe - getSSRCsFromContent - putting " + media + " into map sources: " + sourcePacketExtensions.toString());
+//                mediaSourceMap.put(media, sourcePacketExtensions);
+//            } else {
+//                classLogger.info("keyframe - getSSRCsFromContent - skipping adding "
+//                    + media + " with " + sourcePacketExtensions.toString() + " because it already exists " + mediaSourceMap.get(media));
+//            }
         }
 
         return new MediaSourceMap(mediaSourceMap);
