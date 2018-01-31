@@ -937,13 +937,18 @@ public class ColibriConferenceImpl
                         + ", contentChannelsInfo: " + localChannelsInfo.getContent(contentName)
                         + ", content channels: " + localChannelsInfo.getContent(contentName)
                         .getChannels());
-                    String channelId
-                        = localChannelsInfo.getContent(contentName)
-                            .getChannels().get(0).getID();
-                    send |= colibriBuilder.addRtpDescription(
+                    ColibriConferenceIQ.Content content
+                        = localChannelsInfo.getContent(contentName);
+
+                    if (content != null && content.getChannelCount() > 0)
+                    {
+                        String channelId = content.getChannel(0).getID();
+                        send |= colibriBuilder.addRtpDescription(
                             descriptionMap.get(contentName),
                             contentName,
                             channelId);
+                    }
+
                 }
             }
             // SSRCs
