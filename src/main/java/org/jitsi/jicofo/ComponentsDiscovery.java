@@ -83,6 +83,12 @@ public class ComponentsDiscovery
     private Timer rediscoveryTimer;
 
     /**
+     * The <tt>EventAdmin</tt> used by this instance to fire/send
+     * <TT>BridgeEvent</tt>s.
+     */
+    private EventAdmin eventAdmin;
+
+    /**
      * XMPP xmppDomain for which we're discovering service info.
      */
     private String xmppDomain;
@@ -151,6 +157,12 @@ public class ComponentsDiscovery
 
         Assert.notNull(xmppDomain, "xmppDomain");
         Assert.notNull(protocolProviderHandler, "protocolProviderHandler");
+
+        this.eventAdmin = FocusBundleActivator.getEventAdmin();
+        if (eventAdmin == null)
+        {
+            throw new IllegalStateException("EventAdmin service not found");
+        }
 
         this.xmppDomain = xmppDomain;
         this.protocolProviderHandler = protocolProviderHandler;
@@ -551,6 +563,8 @@ public class ComponentsDiscovery
                         "No stats seen from " + bridgeJid + " for too long");
 
                     bridges.remove();
+
+                    eventAdmin.postEvent(BridgeEvent.createHealthFailed(bridgeJid));
 
                     bridgeWentOffline(bridge.getKey());
                 }
