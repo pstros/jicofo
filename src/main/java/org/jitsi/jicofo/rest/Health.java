@@ -163,6 +163,10 @@ public class Health
 
                 List<String> activeJVBs = bridgeSelector.listActiveJVBs();
 
+                logger.error("TEST");
+                logger.error(activeJVBs.size());
+                logger.error(activeJVBs.isEmpty());
+
                 // ABORT here if the list is empty
                 if (activeJVBs.isEmpty())
                 {

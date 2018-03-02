@@ -86,7 +86,7 @@ public class ComponentsDiscovery
      * The <tt>EventAdmin</tt> used by this instance to fire/send
      * <TT>BridgeEvent</tt>s.
      */
-    private EventAdmin eventAdmin;
+    //private EventAdmin eventAdmin;
 
     /**
      * XMPP xmppDomain for which we're discovering service info.
@@ -158,11 +158,13 @@ public class ComponentsDiscovery
         Assert.notNull(xmppDomain, "xmppDomain");
         Assert.notNull(protocolProviderHandler, "protocolProviderHandler");
 
+        /*
         this.eventAdmin = FocusBundleActivator.getEventAdmin();
         if (eventAdmin == null)
         {
             throw new IllegalStateException("EventAdmin service not found");
         }
+        */
 
         this.xmppDomain = xmppDomain;
         this.protocolProviderHandler = protocolProviderHandler;
@@ -564,7 +566,7 @@ public class ComponentsDiscovery
 
                     bridges.remove();
 
-                    eventAdmin.postEvent(BridgeEvent.createHealthFailed(bridgeJid));
+                    //eventAdmin.postEvent(BridgeEvent.createHealthFailed(bridgeJid));
 
                     bridgeWentOffline(bridge.getKey());
                 }
