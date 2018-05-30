@@ -38,13 +38,21 @@ case "$1" in
 
             # generate secret only for new installs
             if [ "$OLDCONFIG" = "false" ]; then
-                # 8-chars random secret, alternative to pwgen 8
-                JICOFO_SECRET=`head -c 8 /dev/urandom | tr '\0-\377' 'a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9@@@@####'`
+                db_get jicofo/jicofosecret
+                if [ -z "$RET" ] ; then
+                    # 8-chars random secret, alternative to pwgen 8
+                    RET=`head -c 8 /dev/urandom | tr '\0-\377' 'a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9@@@@####'`
+                fi
+                JICOFO_SECRET="$RET"
             fi
             JICOFO_PORT=5347
             JICOFO_AUTH_DOMAIN="auth.$JICOFO_HOSTNAME"
             JICOFO_AUTH_USER="focus"
-            JICOFO_AUTH_PASSWORD=`head -c 8 /dev/urandom | tr '\0-\377' 'a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9@@@@####'`
+            db_get jicofo/jicofo-authpassword
+            if [ -z "$RET" ] ; then
+                RET=`head -c 8 /dev/urandom | tr '\0-\377' 'a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9a-zA-Z0-9@@@@####'`
+            fi
+            JICOFO_AUTH_PASSWORD="$RET"
 
             # storing default
             echo '# Jitsi Conference Focus settings' > $CONFIG
@@ -113,10 +121,7 @@ case "$1" in
             usermod -g jitsi jicofo
         fi
 
-        # we create home folder only if it doesn't exist
-        if [ ! -d /usr/share/jicofo ]; then
-            mkdir -p /usr/share/jicofo
-        fi
+        mkdir -p /usr/share/jicofo
 
         # we claim the home folder of jicofo in case it is owned by someone else
         OWNER=$(stat -c '%U' /usr/share/jicofo)
@@ -129,8 +134,8 @@ case "$1" in
 
         CONFIG_DIR=$(dirname $CONFIG)
         if ! dpkg-statoverride --list "$CONFIG_DIR" >/dev/null; then
-                chown root:$GROUP "$CONFIG_DIR"
-                chmod 750 "$CONFIG_DIR"
+            chown -R jicofo:jitsi "$CONFIG_DIR"
+            chmod 750 "$CONFIG_DIR"
         fi
 
         # die logz

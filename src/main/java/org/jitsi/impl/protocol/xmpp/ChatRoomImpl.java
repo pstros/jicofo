@@ -23,14 +23,21 @@ import net.java.sip.communicator.service.protocol.Message;
 import net.java.sip.communicator.service.protocol.event.*;
 import net.java.sip.communicator.util.Logger;
 
+import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.*;
+import org.jivesoftware.smack.SmackException.*;
 import org.jivesoftware.smack.packet.*;
-import org.jivesoftware.smackx.*;
 import org.jivesoftware.smackx.muc.*;
-import org.jivesoftware.smackx.packet.*;
+import org.jivesoftware.smackx.muc.MultiUserChatException.*;
+import org.jivesoftware.smackx.muc.packet.*;
+import org.jivesoftware.smackx.xdata.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
+import org.jxmpp.jid.parts.*;
+import org.jxmpp.stringprep.*;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -42,7 +49,7 @@ import java.util.concurrent.*;
  */
 public class ChatRoomImpl
     extends AbstractChatRoom
-    implements ChatRoom2
+    implements ChatRoom2, PresenceListener
 {
     /**
      * The logger used by this class.
@@ -50,29 +57,31 @@ public class ChatRoomImpl
     private final static Logger logger = Logger.getLogger(ChatRoomImpl.class);
 
     /**
+     * Constant used to return empty presence list from
+     * {@link #getPresenceExtensions()} in case there's no presence available.
+     */
+    private final static Collection<ExtensionElement>
+        EMPTY_PRESENCE_LIST = Collections.emptyList();
+
+    /**
      * Parent MUC operation set.
      */
     private final OperationSetMultiUserChatImpl opSet;
 
     /**
-     * Caches early presence packets triggered by Smack, before there was member
-     * joined event.
+     * The room JID (e.g. "room@service").
      */
-    private Map<String, Presence> presenceCache = new HashMap<>();
-
-    /**
-     * Chat room name.
-     */
-    private final String roomName;
+    private final EntityBareJid roomJid;
 
     /**
      * {@link MemberListener} instance.
      */
-    private final MemberListener memberListener;
+    private final MemberListener memberListener = new MemberListener();
 
-    private final ParticipantListener participantListener;
-
-    private PacketInterceptor presenceInterceptor;
+    /**
+     * Listener for presence that smack sends on our behalf.
+     */
+    private PresenceListener presenceInterceptor;
 
     /**
      * Smack multi user chat backend instance.
@@ -80,14 +89,14 @@ public class ChatRoomImpl
     private MultiUserChat muc;
 
     /**
-     * Our nickname.
+     * The resource part of our occupant JID.
      */
-    private String myNickName;
+    private Resourcepart myResourcepart;
 
     /**
      * Our full Multi User Chat XMPP address.
      */
-    private String myMucAddress;
+    private EntityFullJid myOccupantJid;
 
     /**
      * Member presence listeners.
@@ -104,7 +113,7 @@ public class ChatRoomImpl
     /**
      * Nickname to member impl class map.
      */
-    private final Map<String, ChatMemberImpl> members = new HashMap<>();
+    private final Map<EntityFullJid, ChatMemberImpl> members = new HashMap<>();
 
     /**
      * The list of <tt>ChatRoomMemberPropertyChangeListener</tt>.
@@ -123,37 +132,68 @@ public class ChatRoomImpl
     private Presence lastPresenceSent;
 
     /**
-     * Number of participants in the chat room. That excludes the focus member.
+     * Number of members in the chat room. That excludes the focus member.
      */
-    private Integer participantNumber = 0;
+    private Integer memberCount = 0;
+
+    /** The conference that is backed by this MUC room. */
+    private JitsiMeetConference conference;
 
     /**
      * Creates new instance of <tt>ChatRoomImpl</tt>.
      *
      * @param parentChatOperationSet parent multi user chat operation set.
-     * @param roomName the name of the chat room that will be handled by
-     *                 new <tt>ChatRoomImpl</tt>instance.
+     * @param roomJid the room JID (e.g. "room@service").
      */
     public ChatRoomImpl(OperationSetMultiUserChatImpl parentChatOperationSet,
-                        String roomName)
+                        EntityBareJid roomJid)
     {
         this.opSet = parentChatOperationSet;
-        this.roomName = roomName;
+        this.roomJid = roomJid;
 
-        muc = new MultiUserChat(
-                parentChatOperationSet.getConnection(), roomName);
+        MultiUserChatManager manager = MultiUserChatManager
+                .getInstanceFor(parentChatOperationSet.getConnection());
+        muc = manager.getMultiUserChat(this.roomJid);
 
-        this.memberListener = new MemberListener();
         muc.addParticipantStatusListener(memberListener);
+        muc.addParticipantListener(this);
+    }
 
-        this.participantListener = new ParticipantListener();
-        muc.addParticipantListener(participantListener);
+    /**
+     * Sets the conference that is backed by this MUC. Can only be set once.
+     * @param conference the conference backed by this MUC.
+     */
+    public void setConference(JitsiMeetConference conference)
+    {
+        if (this.conference != null)
+        {
+            throw new IllegalStateException("Conference is already set!");
+        }
+
+        this.conference = conference;
+    }
+
+    void setStartMuted(boolean[] startMuted)
+    {
+        if (conference == null)
+        {
+            logger.warn("Can not set 'start muted', conference is null.");
+            return;
+        }
+
+        conference.setStartMuted(startMuted);
     }
 
     @Override
     public String getName()
     {
-        return roomName;
+        return roomJid.toString();
+    }
+
+    @Override
+    public EntityBareJid getRoomJid()
+    {
+        return roomJid;
     }
 
     @Override
@@ -183,24 +223,21 @@ public class ChatRoomImpl
     {
         try
         {
-            this.myNickName = nickname;
-            this.myMucAddress = roomName + "/" + nickname;
+            this.myResourcepart = Resourcepart.from(nickname);
+            this.myOccupantJid = JidCreate.entityFullFrom(roomJid,
+                                                          myResourcepart);
 
-            this.presenceInterceptor = new PacketInterceptor()
+            this.presenceInterceptor = new PresenceListener()
             {
                 @Override
-                public void interceptPacket(Packet packet)
+                public void processPresence(Presence packet)
                 {
-                    if (packet instanceof Presence)
-                    {
-                        lastPresenceSent = (Presence) packet;
-                    }
+                    lastPresenceSent = packet;
                 }
             };
             muc.addPresenceInterceptor(presenceInterceptor);
 
-            muc.create(nickname);
-            //muc.join(nickname);
+            muc.createOrJoin(myResourcepart);
 
             // Make the room non-anonymous, so that others can
             // recognize focus JID
@@ -213,9 +250,15 @@ public class ChatRoomImpl
             }*/
             Form answer = config.createAnswerForm();
             // Room non-anonymous
-            FormField whois = new FormField("muc#roomconfig_whois");
+            String whoisFieldName = "muc#roomconfig_whois";
+            FormField whois = answer.getField(whoisFieldName);
+            if (whois == null)
+            {
+                whois = new FormField(whoisFieldName);
+                answer.addField(whois);
+            }
+
             whois.addValue("anyone");
-            answer.addField(whois);
             // Room moderated
             //FormField roomModerated
             //    = new FormField("muc#roomconfig_moderatedroom");
@@ -244,7 +287,13 @@ public class ChatRoomImpl
 
             muc.sendConfigurationForm(answer);
         }
-        catch (XMPPException e)
+        catch (XMPPException
+                | XmppStringprepException
+                | MucAlreadyJoinedException
+                | NotAMucServiceException
+                | NoResponseException
+                | NotConnectedException
+                | InterruptedException e)
         {
             throw new OperationFailedException(
                 "Failed to join the room",
@@ -262,10 +311,10 @@ public class ChatRoomImpl
     @Override
     public boolean isJoined()
     {
-        return muc.isJoined();
+        return muc != null && muc.isJoined();
     }
 
-    private void leave(String reason, String jid)
+    private void leave(String reason, EntityBareJid jid)
     {
         logger.info("Leave, reason: " + reason + " alt-jid: " + jid);
 
@@ -275,9 +324,18 @@ public class ChatRoomImpl
     @Override
     public void leave()
     {
-        Connection connection = opSet.getConnection();
+        XMPPConnection connection = opSet.getConnection();
         if (connection != null && connection.isConnected())
-            muc.leave();
+        {
+            try
+            {
+                muc.leave();
+            }
+            catch (NotConnectedException | InterruptedException e)
+            {
+                logger.error("Failed to properly leave " + muc.toString(), e);
+            }
+        }
 
         // Simulate member left events
         // No need to do this - we dispose whole conference anyway on stop
@@ -302,13 +360,28 @@ public class ChatRoomImpl
                 alternateAddress);*/
 
         if (presenceInterceptor != null)
+        {
             muc.removePresenceInterceptor(presenceInterceptor);
-        muc.removeParticipantStatusListener(memberListener);
+        }
 
-        if (connection != null && connection.isConnected())
-            muc.removeParticipantListener(participantListener);
+        if (memberListener != null)
+        {
+            muc.removeParticipantStatusListener(memberListener);
+        }
 
-        muc.dispose();
+        muc.removeParticipantListener(this);
+
+        try
+        {
+            // FIXME smack4: there used to be a custom dispose() method
+            // if leave() fails, there might still be some listeners lingering
+            // around
+            muc.leave();
+        }
+        catch (NotConnectedException | InterruptedException e)
+        {
+            logger.warn("Could not properly leave " + muc.toString(), e);
+        }
 
         opSet.removeRoom(this);
     }
@@ -329,21 +402,27 @@ public class ChatRoomImpl
     @Override
     public String getUserNickname()
     {
-        return myNickName;
+        return myResourcepart.toString();
     }
 
     @Override
     public ChatRoomMemberRole getUserRole()
     {
-        if(this.role == null)
+        if (this.role == null)
         {
-            Occupant o = muc.getOccupant(myMucAddress);
+            Occupant o = muc.getOccupant(myOccupantJid);
 
-            if(o == null)
+            if (o == null)
+            {
                 return null;
+            }
             else
-                this.role = ChatRoomJabberImpl.smackRoleToScRole(
-                    o.getRole(), o.getAffiliation());
+            {
+                this.role
+                    = ChatRoomJabberImpl.smackRoleToScRole(
+                        o.getRole(),
+                        o.getAffiliation());
+            }
         }
 
         return this.role;
@@ -359,19 +438,19 @@ public class ChatRoomImpl
     }
 
     /**
-     * Resets cached role instance for given participant.
-     * @param participant full mucJID of the participant for whom we want to
-     *                    reset cached role instance.
+     * Resets cached role instance for given occupantJid.
+     * @param occupantJid full mucJID of the occupant for whom we want to
+     * reset the cached role instance.
      */
-    private void resetRoleForParticipant(String participant)
+    private void resetRoleForOccupant(EntityFullJid occupantJid)
     {
-        if (participant.endsWith("/" + myNickName))
+        if (occupantJid.getResourcepart().equals(myResourcepart))
         {
             resetCachedUserRole();
         }
         else
         {
-            ChatMemberImpl member = members.get(participant);
+            ChatMemberImpl member = members.get(occupantJid);
             if (member != null)
             {
                 member.resetCachedRole();
@@ -379,7 +458,7 @@ public class ChatRoomImpl
             else
             {
                 logger.error(
-                    "Role reset for: " + participant + " who does not exist");
+                    "Role reset for: " + occupantJid + " who does not exist");
             }
         }
     }
@@ -407,13 +486,15 @@ public class ChatRoomImpl
     {
         ChatRoomLocalUserRoleChangeEvent evt
             = new ChatRoomLocalUserRoleChangeEvent(
-            this, previousRole, newRole, isInitial);
+                this, previousRole, newRole, isInitial);
 
         if (logger.isTraceEnabled())
+        {
             logger.trace("Will dispatch the following ChatRoom event: " + evt);
+        }
 
-        for (ChatRoomLocalUserRoleListener listener : localUserRoleListeners)
-            listener.localUserRoleChanged(evt);
+        localUserRoleListeners
+            .forEach(listener -> listener.localUserRoleChanged(evt));
     }
 
     /**
@@ -513,24 +594,26 @@ public class ChatRoomImpl
     {
         synchronized (members)
         {
-            return new ArrayList<ChatRoomMember>(members.values());
+            return new ArrayList<>(members.values());
         }
     }
 
     @Override
-    public XmppChatMember findChatMember(String mucJid)
+    public XmppChatMember findChatMember(Jid occupantJid)
     {
-        ArrayList<ChatMemberImpl> copy;
-        synchronized (members)
+        if (occupantJid == null)
         {
-            copy = new ArrayList<>(members.values());
+            return null;
         }
 
-        for (ChatMemberImpl member : copy)
+        synchronized (members)
         {
-            if (member.getContactAddress().equals(mucJid))
+            for (ChatMemberImpl member : members.values())
             {
-                return member;
+                if (occupantJid.equals(member.getOccupantJid()))
+                {
+                    return member;
+                }
             }
         }
 
@@ -538,9 +621,9 @@ public class ChatRoomImpl
     }
 
     @Override
-    public String getLocalMucJid()
+    public EntityFullJid getLocalOccupantJid()
     {
-        return myMucAddress;
+        return myOccupantJid;
     }
 
     @Override
@@ -559,6 +642,17 @@ public class ChatRoomImpl
     public void removeMessageListener(ChatRoomMessageListener listener)
     {
 
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean containsPresenceExtension(String elementName,
+                                             String namespace)
+    {
+        return lastPresenceSent != null
+            && lastPresenceSent.getExtension(elementName, namespace) != null;
     }
 
     @Override
@@ -638,9 +732,9 @@ public class ChatRoomImpl
     {
         try
         {
-            muc.grantAdmin(address);
+            muc.grantAdmin(JidCreate.from(address));
         }
-        catch (XMPPException e)
+        catch (Exception e)
         {
             throw new RuntimeException(e);
         }
@@ -651,9 +745,9 @@ public class ChatRoomImpl
     {
         try
         {
-            muc.grantMembership(address);
+            muc.grantMembership(JidCreate.from(address));
         }
-        catch (XMPPException e)
+        catch (Exception e)
         {
             throw new RuntimeException(e);
         }
@@ -664,9 +758,9 @@ public class ChatRoomImpl
     {
         try
         {
-            muc.grantModerator(nickname);
+            muc.grantModerator(Resourcepart.from(nickname));
         }
-        catch (XMPPException e)
+        catch (Exception e)
         {
             throw new RuntimeException(e);
         }
@@ -681,11 +775,20 @@ public class ChatRoomImpl
         // to be using wrong namespace(muc#owner instead of muc#admin)
         // which does not work with the Prosody.
         MUCAdmin admin = new MUCAdmin();
-        admin.setType(IQ.Type.SET);
-        admin.setTo(roomName);
+        admin.setType(IQ.Type.set);
+        admin.setTo(roomJid);
 
-        MUCAdmin.Item item = new MUCAdmin.Item("owner", null);
-        item.setJid(address);
+        Jid jidAddress;
+        try
+        {
+            jidAddress = JidCreate.from(address);
+        }
+        catch (XmppStringprepException e)
+        {
+            throw new RuntimeException(e);
+        }
+
+        MUCItem item = new MUCItem(MUCAffiliation.owner, jidAddress);
         admin.addItem(item);
 
         XmppProtocolProvider provider
@@ -696,7 +799,7 @@ public class ChatRoomImpl
         try
         {
             IQ reply = (IQ) connection.sendPacketAndGetReply(admin);
-            if (reply == null || reply.getType() != IQ.Type.RESULT)
+            if (reply == null || reply.getType() != IQ.Type.result)
             {
                 // FIXME: we should have checked exceptions for all operations
                 // in ChatRoom interface which are expected to fail.
@@ -774,9 +877,13 @@ public class ChatRoomImpl
     {
         try
         {
-            muc.destroy(reason, alternateAddress);
+            muc.destroy(reason, JidCreate.entityBareFrom(alternateAddress));
         }
-        catch (XMPPException e)
+        catch (XMPPException
+                | XmppStringprepException
+                | InterruptedException
+                | NoResponseException
+                | NotConnectedException e)
         {
             //FIXME: should not be runtime, but OperationFailed is not
             // included in interface signature(see also other methods
@@ -798,43 +905,34 @@ public class ChatRoomImpl
 
     }
 
-    private void notifyParticipantJoined(ChatMemberImpl member)
+    private void notifyMemberJoined(ChatMemberImpl member)
     {
         ChatRoomMemberPresenceChangeEvent event
             = new ChatRoomMemberPresenceChangeEvent(
                     this, member,
                     ChatRoomMemberPresenceChangeEvent.MEMBER_JOINED, null);
 
-        for (ChatRoomMemberPresenceListener l : listeners)
-        {
-            l.memberPresenceChanged(event);
-        }
+        listeners.forEach(l -> l.memberPresenceChanged(event));
     }
 
-    private void notifyParticipantLeft(ChatMemberImpl member)
+    private void notifyMemberLeft(ChatMemberImpl member)
     {
         ChatRoomMemberPresenceChangeEvent event
             = new ChatRoomMemberPresenceChangeEvent(
                     this, member,
                     ChatRoomMemberPresenceChangeEvent.MEMBER_LEFT, null);
 
-        for (ChatRoomMemberPresenceListener l : listeners)
-        {
-            l.memberPresenceChanged(event);
-        }
+        listeners.forEach(l -> l.memberPresenceChanged(event));
     }
 
-    private void notifyParticipantKicked(ChatMemberImpl member)
+    private void notifyMemberKicked(ChatMemberImpl member)
     {
         ChatRoomMemberPresenceChangeEvent event
             = new ChatRoomMemberPresenceChangeEvent(
                     this, member,
                     ChatRoomMemberPresenceChangeEvent.MEMBER_KICKED, null);
 
-        for (ChatRoomMemberPresenceListener l : listeners)
-        {
-            l.memberPresenceChanged(event);
-        }
+        listeners.forEach(l -> l.memberPresenceChanged(event));
     }
 
     private void notifyMemberPropertyChanged(ChatMemberImpl member)
@@ -845,15 +943,12 @@ public class ChatRoomImpl
                     ChatRoomMemberPropertyChangeEvent.MEMBER_PRESENCE,
                     null, member.getPresence());
 
-        for (ChatRoomMemberPropertyChangeListener l : propListeners)
-        {
-            l.chatRoomPropertyChanged(event);
-        }
+        propListeners.forEach(l -> l.chatRoomPropertyChanged(event));
     }
 
-    public Occupant getOccupant(ChatMemberImpl chatMemeber)
+    Occupant getOccupant(ChatMemberImpl chatMember)
     {
-        return muc.getOccupant(chatMemeber.getContactAddress());
+        return muc.getOccupant(chatMember.getOccupantJid());
     }
 
     /**
@@ -863,7 +958,7 @@ public class ChatRoomImpl
      * @param packet the packet that may include the MUCUser extension.
      * @return the MUCUser found in the packet.
      */
-    private MUCUser getMUCUserExtension(Packet packet)
+    private MUCUser getMUCUserExtension(Presence packet)
     {
         if (packet != null)
         {
@@ -874,8 +969,8 @@ public class ChatRoomImpl
         return null;
     }
 
-    public void setPresenceExtension(PacketExtension extension,
-                                     boolean         remove)
+    public void setPresenceExtension(ExtensionElement extension,
+                                     boolean          remove)
     {
         if (lastPresenceSent == null)
         {
@@ -887,7 +982,7 @@ public class ChatRoomImpl
             = (XmppProtocolProvider) getParentProvider();
 
         // Remove old
-        PacketExtension old
+        ExtensionElement old
             = lastPresenceSent.getExtension(
                     extension.getElementName(), extension.getNamespace());
         if (old != null)
@@ -908,277 +1003,468 @@ public class ChatRoomImpl
             return;
         }
 
-        connection.sendPacket(lastPresenceSent);
+        connection.sendStanza(lastPresenceSent);
     }
 
-    private ChatMemberImpl addMember(String participant)
+    /**
+     * {@inheritDoc}
+     */
+    public Collection<ExtensionElement> getPresenceExtensions()
     {
-        ChatMemberImpl newMember;
+        return lastPresenceSent != null
+            ? new ArrayList<>(lastPresenceSent.getExtensions())
+            : EMPTY_PRESENCE_LIST;
+    }
 
-        synchronized (members)
+    /**
+     * {@inheritDoc}
+     */
+    public void modifyPresence(Collection<ExtensionElement> toRemove,
+                               Collection<ExtensionElement> toAdd)
+    {
+        if (lastPresenceSent == null)
         {
-            if (members.containsKey(participant))
-            {
-                logger.error(participant + " already in " + roomName);
-                return null;
-            }
-
-            if(!participant.equals(myMucAddress))
-            {
-                participantNumber++;
-            }
-
-            newMember
-                = new ChatMemberImpl(participant, ChatRoomImpl.this,
-                        participantNumber);
-
-            members.put(participant, newMember);
+            logger.error("No presence packet obtained yet");
+            return;
         }
 
-        return newMember;
+        XmppProtocolProvider xmppProtocolProvider
+            = (XmppProtocolProvider) getParentProvider();
+
+        // Remove old
+        if (toRemove != null)
+        {
+            toRemove.forEach(old -> lastPresenceSent.removeExtension(old));
+        }
+
+        // Add new
+        if (toAdd != null)
+        {
+            toAdd.forEach(newExt -> lastPresenceSent.addExtension(newExt));
+        }
+
+        XmppConnection connection = xmppProtocolProvider.getConnectionAdapter();
+        if (connection == null)
+        {
+            logger.error("Failed to send presence extension - no connection");
+            return;
+        }
+
+        connection.sendStanza(lastPresenceSent);
     }
 
-    String getMemberJid(String mucAddress)
+    /**
+     * Adds a new {@link ChatMemberImpl} with the given JID to {@link #members}.
+     * If a member with the given JID already exists, it returns the existing
+     * instance.
+     * @param jid the JID of the member.
+     * @return the {@link ChatMemberImpl} for the member with the given JID.
+     */
+    private ChatMemberImpl addMember(EntityFullJid jid)
     {
-        Occupant occupant = muc.getOccupant(mucAddress);
+        synchronized (members)
+        {
+            if (members.containsKey(jid))
+            {
+                return members.get(jid);
+            }
+
+            if (!jid.equals(myOccupantJid))
+            {
+                memberCount++;
+            }
+
+            ChatMemberImpl newMember
+                = new ChatMemberImpl(jid, ChatRoomImpl.this, memberCount);
+
+            members.put(jid, newMember);
+
+            return newMember;
+        }
+    }
+
+    /**
+     * Gets the "real" JID of an occupant of this room specified by its
+     * occupant JID.
+     * @param occupantJid the occupant JID.
+     * @return the "real" JID of the occupant, or {@code null}.
+     */
+    Jid getJid(EntityFullJid occupantJid)
+    {
+        Occupant occupant = muc.getOccupant(occupantJid);
         if (occupant == null)
         {
-            logger.error("Unable to get occupant for " + mucAddress);
+            logger.error("Unable to get occupant for " + occupantJid);
             return null;
         }
         return occupant.getJid();
+    }
+
+    /**
+     * Processes a <tt>Presence</tt> packet addressed to our own occupant
+     * JID.
+     * @param presence the packet to process.
+     */
+    private void processOwnPresence(Presence presence)
+    {
+        MUCUser mucUser = getMUCUserExtension(presence);
+
+        if (mucUser != null)
+        {
+            MUCAffiliation affiliation = mucUser.getItem().getAffiliation();
+            MUCRole role = mucUser.getItem().getRole();
+
+            // this is the presence for our member initial role and
+            // affiliation, as smack do not fire any initial
+            // events lets check it and fire events
+            ChatRoomMemberRole jitsiRole
+                = ChatRoomJabberImpl.smackRoleToScRole(role, affiliation);
+
+            if (!presence.isAvailable()
+                && MUCAffiliation.none == affiliation
+                && MUCRole.none == role)
+            {
+                Destroy destroy = mucUser.getDestroy();
+                if (destroy == null)
+                {
+                    // the room is unavailable to us, there is no
+                    // message we will just leave
+                    leave();
+                }
+                else
+                {
+                    leave(destroy.getReason(), destroy.getJid());
+                }
+            }
+            else
+            {
+                setLocalUserRole(jitsiRole, ChatRoomImpl.this.role == null);
+            }
+        }
+    }
+
+    /**
+     * Process a <tt>Presence</tt> packet sent by one of the other room
+     * occupants.
+     * @param presence the presence.
+     */
+    private void processOtherPresence(Presence presence)
+    {
+        EntityFullJid jid
+            = presence.getFrom().asEntityFullJidIfPossible();
+        if (jid == null)
+        {
+            logger.warn("Presence without a valid jid: "
+                            + presence.getFrom());
+            return;
+        }
+
+        synchronized (members)
+        {
+            ChatMemberImpl chatMember = (ChatMemberImpl) findChatMember(jid);
+            boolean memberIsNew = false;
+            if (chatMember == null)
+            {
+                if (presence.getType().equals(Presence.Type.available))
+                {
+                    // This is how we detect that a new member has joined. We
+                    // do not use the ParticipantStatusListener#joined callback.
+                    if (logger.isDebugEnabled())
+                    {
+                        logger.debug("Joined " + jid + " room: " + roomJid);
+                    }
+                    chatMember = addMember(jid);
+                    memberIsNew = true;
+                }
+                else
+                {
+                    // It is not clear to me whether the first presence from
+                    // a member necessarily needs to have type "available", but
+                    // this has worked so far and I don't want to change it.
+
+                    // We received presence from an unknown member which doesn't
+                    // look like a new member's presence. Ignore it.
+                    return;
+                }
+            }
+
+            if (chatMember != null)
+            {
+                chatMember.processPresence(presence);
+
+                if (memberIsNew)
+                {
+                    // Trigger member "joined"
+                    notifyMemberJoined(chatMember);
+                }
+
+                notifyMemberPropertyChanged(chatMember);
+            }
+        }
+    }
+
+    /**
+     * Processes an incoming presence packet.
+     *
+     * @param presence the incoming presence.
+     */
+    @Override
+    public void processPresence(Presence presence)
+    {
+        if (presence == null || presence.getError() != null)
+        {
+            logger.warn("Unable to handle packet: " +
+                            (presence == null ? "null" : presence.toXML()));
+            return;
+        }
+
+        if (logger.isTraceEnabled())
+        {
+            logger.trace("Presence received " + presence.toXML());
+        }
+
+        // Should never happen, but log if something is broken
+        if (myOccupantJid == null)
+        {
+            logger.error(
+                "Processing presence when we're not aware of our address");
+        }
+
+        if (myOccupantJid != null && myOccupantJid.equals(presence.getFrom()))
+        {
+            processOwnPresence(presence);
+        }
+        else
+        {
+            processOtherPresence(presence);
+        }
     }
 
     class MemberListener
         implements ParticipantStatusListener
     {
         @Override
-        public void joined(String mucJid)
+        public void joined(EntityFullJid mucJid)
         {
-            synchronized (members)
+            // When a new member joins, Smack seems to fire
+            // ParticipantStatusListener#joined and
+            // PresenceListener#processPresence in a non-deterministic order.
+
+            // In order to ensure that we have all the information contained
+            // in presence at the time that we create a new ChatMemberImpl,
+            // we completely ignore this joined event. Instead, we rely on
+            // processPresence to detect when a new member has joined and
+            // trigger the creation of a ChatMemberImpl by calling
+            // ChatRoomImpl#memberJoined()
+
+            if (logger.isDebugEnabled())
             {
-                if (logger.isDebugEnabled())
-                {
-                    logger.debug("Joined " + mucJid + " room: " + roomName);
-                }
-                //logger.info(Thread.currentThread()+"JOINED ROOM: "+participant);
-
-                ChatMemberImpl member = addMember(mucJid);
-                if (member == null)
-                {
-                    logger.error("member is NULL");
-                    return;
-                }
-
-                // Process any cached presence
-                XmppProtocolProvider protocolProvider
-                    = (XmppProtocolProvider) getParentProvider();
-
-                XMPPConnection connection = protocolProvider.getConnection();
-                if (connection == null)
-                {
-                    logger.error("Connection is NULL");
-                    return;
-                }
-
-                // Process presence cached in the roster to init fields
-                // like video muted etc.
-                Presence cachedPresence = presenceCache.get(mucJid);
-                if (cachedPresence != null)
-                {
-                    member.processPresence(cachedPresence);
-                }
-
-                // Trigger participant "joined"
-                notifyParticipantJoined(member);
-
-                // Fire presence event after "joined" event
-                if (cachedPresence != null)
-                {
-                    notifyMemberPropertyChanged(member);
-                }
+                logger.debug("Ignore a member joined event for " + mucJid);
             }
         }
 
-        private ChatMemberImpl removeMember(String participant)
+        private ChatMemberImpl removeMember(EntityFullJid occupantJid)
         {
             synchronized (members)
             {
-                ChatMemberImpl removed = members.remove(participant);
+                ChatMemberImpl removed = members.remove(occupantJid);
 
                 if (removed == null)
-                    logger.error(participant + " not in " + roomName);
+                {
+                    logger.error(occupantJid + " not in " + roomJid);
+                }
 
-                participantNumber--;
+                memberCount--;
 
                 return removed;
             }
         }
 
         @Override
-        public void left(String participant)
+        public void left(EntityFullJid occupantJid)
         {
             synchronized (members)
             {
                 if (logger.isDebugEnabled())
                 {
-                    logger.debug("Left " + participant + " room: " + roomName);
+                    logger.debug("Left " + occupantJid + " room: " + roomJid);
                 }
 
-                ChatMemberImpl member = removeMember(participant);
+                ChatMemberImpl member = removeMember(occupantJid);
 
                 if (member != null)
                 {
-                    notifyParticipantLeft(member);
+                    notifyMemberLeft(member);
                 }
                 else
                 {
                     logger.warn(
-                        "Member left event for non-existing participant: "
-                                    + participant);
+                        "Member left event for non-existing member: "
+                                    + occupantJid);
                 }
-
-                // Clear cached Presence
-                presenceCache.remove(participant);
             }
         }
 
         @Override
-        public void kicked(String participant, String s2, String s3)
+        public void kicked(EntityFullJid occupantJid, Jid actor, String reason)
         {
             synchronized (members)
             {
                 if (logger.isDebugEnabled())
                 {
                     logger.debug(
-                        "Kicked: " + participant + ", " + s2 + ", " + s3);
+                        "Kicked: " + occupantJid + ", "
+                                + actor + ", " + reason);
                 }
 
-                ChatMemberImpl member = removeMember(participant);
+                ChatMemberImpl member = removeMember(occupantJid);
 
                 if (member == null)
                 {
                     logger.error(
-                        "Kicked participant does not exist: " + participant);
+                        "Kicked member does not exist: " + occupantJid);
                     return;
                 }
 
-                notifyParticipantKicked(member);
+                notifyMemberKicked(member);
             }
         }
 
         @Override
-        public void voiceGranted(String s)
+        public void voiceGranted(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Voice granted: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void voiceRevoked(String s)
+        public void voiceRevoked(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Voice revoked: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void banned(String s, String s2, String s3)
+        public void banned(EntityFullJid s, Jid actor, String reason)
         {
             if (logger.isTraceEnabled())
-                logger.trace("Banned: " + s + ", " + s2 + ", " + s3);
+            {
+                logger.trace("Banned: " + s + ", " + actor + ", " + reason);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void membershipGranted(String s)
+        public void membershipGranted(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Membership granted: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void membershipRevoked(String s)
+        public void membershipRevoked(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Membership revoked: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void moderatorGranted(String s)
+        public void moderatorGranted(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Moderator granted: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void moderatorRevoked(String s)
+        public void moderatorRevoked(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Moderator revoked: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void ownershipGranted(String s)
+        public void ownershipGranted(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Ownership granted: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void ownershipRevoked(String s)
+        public void ownershipRevoked(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Ownership revoked: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void adminGranted(String s)
+        public void adminGranted(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Admin granted: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void adminRevoked(String s)
+        public void adminRevoked(EntityFullJid s)
         {
             if (logger.isTraceEnabled())
+            {
                 logger.trace("Admin revoked: " + s);
+            }
 
             // We do not fire events - not required for now
-            resetRoleForParticipant(s);
+            resetRoleForOccupant(s);
         }
 
         @Override
-        public void nicknameChanged(String oldNickname, String newNickname)
+        public void nicknameChanged(EntityFullJid oldNickname,
+                                    Resourcepart newNickname)
         {
             logger.error("nicknameChanged - NOT IMPLEMENTED");
             /*synchronized (members)
@@ -1187,122 +1473,6 @@ public class ChatRoomImpl
 
                 addMember(newNickname);
             }*/
-        }
-    }
-
-    class ParticipantListener
-        implements PacketListener
-    {
-
-        /**
-         * Processes an incoming presence packet.
-         * @param packet the incoming packet.
-         */
-        @Override
-        public void processPacket(Packet packet)
-        {
-            if (packet == null
-                || !(packet instanceof Presence)
-                || packet.getError() != null)
-            {
-                logger.warn("Unable to handle packet: " +
-                                    ((packet == null) ? "" : packet.toXML()));
-                return;
-            }
-
-            Presence presence = (Presence) packet;
-            if (logger.isTraceEnabled())
-            {
-                logger.trace("Presence received " + presence.toXML());
-            }
-
-            // Should never happen, but log if something is broken
-            if (myMucAddress == null)
-            {
-                logger.error(
-                    "Processing presence when we're not aware of our address");
-            }
-
-            if (myMucAddress != null && myMucAddress.equals(presence.getFrom()))
-                processOwnPresence(presence);
-            else
-                processOtherPresence(presence);
-        }
-
-        /**
-         * Processes a <tt>Presence</tt> packet addressed to our own occupant
-         * JID.
-         * @param presence the packet to process.
-         */
-        private void processOwnPresence(Presence presence)
-        {
-            MUCUser mucUser = getMUCUserExtension(presence);
-
-            if (mucUser != null)
-            {
-                String affiliation = mucUser.getItem().getAffiliation();
-                String role = mucUser.getItem().getRole();
-
-                // this is the presence for our member initial role and
-                // affiliation, as smack do not fire any initial
-                // events lets check it and fire events
-                ChatRoomMemberRole jitsiRole =
-                    ChatRoomJabberImpl.smackRoleToScRole(role, affiliation);
-
-                if(!presence.isAvailable()
-                    && "none".equalsIgnoreCase(affiliation)
-                    && "none".equalsIgnoreCase(role))
-                {
-                    MUCUser.Destroy destroy = mucUser.getDestroy();
-                    if(destroy == null)
-                    {
-                        // the room is unavailable to us, there is no
-                        // message we will just leave
-                        leave();
-                    }
-                    else
-                    {
-                        leave(destroy.getReason(), destroy.getJid());
-                    }
-                }
-                else
-                {
-                    setLocalUserRole(
-                        jitsiRole, ChatRoomImpl.this.role == null);
-                }
-            }
-        }
-
-        /**
-         * Process a <tt>Presence</tt> packet sent by one of the other room
-         * occupants.
-         */
-        private void processOtherPresence(Presence presence)
-        {
-            ChatMemberImpl chatMember
-                = (ChatMemberImpl) findChatMember(presence.getFrom());
-
-            if (chatMember != null)
-            {
-                chatMember.processPresence(presence);
-
-                notifyMemberPropertyChanged(chatMember);
-            }
-            else
-            {
-                // We want to cache that Presence for "on member joined" event
-                if (presence.getType().equals(Presence.Type.available))
-                {
-                    logger.warn(
-                            "Presence for not existing member: "
-                                + presence.toXML());
-
-                    // Note that this access to #presenceCache is not protected
-                    // by a lock on #members (as opposed to the other places
-                    // where #precenceCache is accessed).
-                    presenceCache.put(presence.getFrom(), presence);
-                }
-            }
         }
     }
 }

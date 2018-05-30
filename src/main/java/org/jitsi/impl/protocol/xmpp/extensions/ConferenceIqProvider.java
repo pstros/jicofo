@@ -20,46 +20,39 @@ package org.jitsi.impl.protocol.xmpp.extensions;
 
 import org.jitsi.util.*;
 
-import org.jivesoftware.smack.packet.*;
 import org.jivesoftware.smack.provider.*;
+
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
+import org.jxmpp.jid.parts.*;
+import org.jxmpp.stringprep.*;
 
 import org.xmlpull.v1.*;
 
 /**
- * Provider handles parsing of {@link ConferenceIq} and {@link LoginUrlIQ}
+ * Provider handles parsing of {@link ConferenceIq} and {@link LoginUrlIq}
  * stanzas and converting objects back to their XML representation.
  *
  * @author Pawel Domas
  */
 public class ConferenceIqProvider
-    implements IQProvider
+    extends IQProvider<ConferenceIq>
 {
-
     /**
      * Creates new instance of <tt>ConferenceIqProvider</tt>.
      */
     public ConferenceIqProvider()
     {
-        ProviderManager providerManager = ProviderManager.getInstance();
-
         // <conference>
-        providerManager.addIQProvider(
+        ProviderManager.addIQProvider(
             ConferenceIq.ELEMENT_NAME, ConferenceIq.NAMESPACE, this);
-
-        // <auth-url>
-        providerManager.addIQProvider(
-            LoginUrlIQ.ELEMENT_NAME, LoginUrlIQ.NAMESPACE, this);
-
-        //<logout>
-        providerManager.addIQProvider(
-            LogoutIq.ELEMENT_NAME, LogoutIq.NAMESPACE, this);
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public IQ parseIQ(XmlPullParser parser)
+    public ConferenceIq parse(XmlPullParser parser, int initialDepth)
         throws Exception
     {
         String namespace = parser.getNamespace();
@@ -72,15 +65,13 @@ public class ConferenceIqProvider
 
         String rootElement = parser.getName();
 
-        ConferenceIq iq = null;
-        LoginUrlIQ authUrlIQ = null;
-        LogoutIq logoutIq = null;
-
+        ConferenceIq iq;
         if (ConferenceIq.ELEMENT_NAME.equals(rootElement))
         {
             iq = new ConferenceIq();
-            String room
-                = parser.getAttributeValue("", ConferenceIq.ROOM_ATTR_NAME);
+            EntityBareJid room
+                = getRoomJid(
+                    parser.getAttributeValue("", ConferenceIq.ROOM_ATTR_NAME));
 
             iq.setRoom(room);
 
@@ -117,56 +108,6 @@ public class ConferenceIqProvider
                 iq.setIdentity(identity);
             }
         }
-        else if (LoginUrlIQ.ELEMENT_NAME.equals(rootElement))
-        {
-            authUrlIQ = new LoginUrlIQ();
-
-            String url = parser.getAttributeValue(
-                    "", LoginUrlIQ.URL_ATTRIBUTE_NAME);
-            if (!StringUtils.isNullOrEmpty(url))
-            {
-                authUrlIQ.setUrl(url);
-            }
-            String room = parser.getAttributeValue(
-                    "", LoginUrlIQ.ROOM_NAME_ATTR_NAME);
-            if (!StringUtils.isNullOrEmpty(room))
-            {
-                authUrlIQ.setRoom(room);
-            }
-            String popup = parser.getAttributeValue(
-                    "", LoginUrlIQ.POPUP_ATTR_NAME);
-            if (!StringUtils.isNullOrEmpty(popup))
-            {
-                Boolean popupBool = Boolean.parseBoolean(popup);
-                authUrlIQ.setPopup(popupBool);
-            }
-            String machineUID = parser.getAttributeValue(
-                    "", LoginUrlIQ.MACHINE_UID_ATTR_NAME);
-            if (!StringUtils.isNullOrEmpty(machineUID))
-            {
-                authUrlIQ.setMachineUID(machineUID);
-            }
-        }
-        else if (LogoutIq.ELEMENT_NAME.endsWith(rootElement))
-        {
-            logoutIq = new LogoutIq();
-
-            String sessionId = parser.getAttributeValue(
-                    "", LogoutIq.SESSION_ID_ATTR);
-
-            if (!StringUtils.isNullOrEmpty(sessionId))
-            {
-                logoutIq.setSessionId(sessionId);
-            }
-
-            String logoutUrl = parser.getAttributeValue(
-                    "", LogoutIq.LOGOUT_URL_ATTR);
-
-            if (!StringUtils.isNullOrEmpty(logoutUrl))
-            {
-                logoutIq.setLogoutUrl(logoutUrl);
-            }
-        }
         else
         {
             return null;
@@ -190,7 +131,7 @@ public class ConferenceIqProvider
                     }
                     else if (ConferenceIq.Property.ELEMENT_NAME.equals(name))
                     {
-                        if (iq != null && property != null)
+                        if (property != null)
                         {
                             iq.addProperty(property);
                             property = null;
@@ -231,17 +172,34 @@ public class ConferenceIqProvider
             }
         }
 
-        if (iq != null)
-        {
-            return iq;
-        }
-        else if (authUrlIQ != null)
-        {
-            return authUrlIQ;
-        }
-        else
-        {
-            return logoutIq;
-        }
+        return iq;
+    }
+
+    /**
+     * Constructs the jid for the room by taking the last '@' part as domain
+     * and everything before it as the node part. Doing validation on the node
+     * part for allowed chars.
+     *
+     * @param unescapedValue the unescaped jid as received in the iq
+     * @return a bare JID constructed from the given parts.
+     * @throws XmppStringprepException if an error occurs.
+     */
+    private EntityBareJid getRoomJid(String unescapedValue)
+        throws XmppStringprepException
+    {
+        // the node part of the jid may contain '@' which is not allowed
+        // and passing the correct node value to Localpart.from will check
+        // for all not allowed jid characters
+        int ix = unescapedValue.lastIndexOf("@");
+
+        if (ix == -1)
+            throw new XmppStringprepException(unescapedValue,
+                "wrong room name jid format");
+
+        String domainPart = unescapedValue.substring(ix + 1);
+        String localPart = unescapedValue.substring(0, ix);
+
+        return JidCreate.entityBareFrom(
+            Localpart.from(localPart), Domainpart.from(domainPart));
     }
 }

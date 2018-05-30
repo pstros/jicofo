@@ -19,7 +19,7 @@ package org.jitsi.jicofo;
 
 import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 
-import org.jitsi.protocol.xmpp.colibri.*;
+import org.jxmpp.jid.*;
 
 /**
  * Class adds utility methods that require use of package protected methods of
@@ -45,22 +45,12 @@ public class ConferenceUtility
     }
 
     /**
-     * Returns the ID of Colibri conference hosted on the videobridge.
-     */
-    public String getJvbConferenceId()
-    {
-        ColibriConference colibriConference = conference.getColibriConference();
-        return colibriConference != null
-            ? colibriConference.getConferenceId() : null;
-    }
-
-    /**
      * Returns the id of video channel allocated for the participant with given
      * JID.
      * @param participantJid the MUC JID of the participant for whom we want to
      *                       get video channel id.
      */
-    public String getParticipantVideoChannelId(String participantJid)
+    public String getParticipantVideoChannelId(Jid participantJid)
     {
         Participant participant
             = conference.findParticipantForRoomJid(participantJid);

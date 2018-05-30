@@ -17,24 +17,25 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-import net.java.sip.communicator.service.protocol.*;
 
 import org.jitsi.jicofo.discovery.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.util.*;
 import org.jitsi.util.*;
+import org.jxmpp.jid.*;
 
 import java.util.*;
 
 /**
  * Class represent Jitsi Meet conference participant. Stores information about
- * Colibri channels allocated, Jingle session and media SSRCs.
+ * Colibri channels allocated, Jingle session and media sources.
  *
  * @author Pawel Domas
+ * @author Boris Grozev
  */
 public class Participant
+    extends AbstractParticipant
 {
     /**
      * The class logger which can be used to override logging level inherited
@@ -44,19 +45,27 @@ public class Participant
         = Logger.getLogger(Participant.class);
 
     /**
+     * Returns the endpoint ID for a participant in the videobridge (Colibri)
+     * context. This method can be used before <tt>Participant</tt> instance is
+     * created for the <tt>ChatRoomMember</tt>.
+     *
+     * @param chatRoomMember XMPP MUC chat room member which represents a
+     *                       <tt>Participant</tt>.
+     */
+    public static String getEndpointId(XmppChatMember chatRoomMember)
+    {
+        return chatRoomMember.getName(); // XMPP MUC Nickname
+    }
+
+    /**
      * MUC chat member of this participant.
      */
     private final XmppChatMember roomMember;
 
     /**
-     * Jingle session(if any) established with this peer.
+     * Jingle session (if any) established with this peer.
      */
     private JingleSession jingleSession;
-
-    /**
-     * Information about Colibri channels allocated for this peer(if any).
-     */
-    private ColibriConferenceIQ colibriChannelsInfo;
 
     /**
      * The logger for this instance. Uses the logging level either of the
@@ -64,49 +73,6 @@ public class Participant
      * whichever is higher.
      */
     private final Logger logger;
-
-    /**
-     * The map of the most recently received RTP description for each Colibri
-     * content.
-     */
-    private Map<String, RtpDescriptionPacketExtension> rtpDescriptionMap;
-
-    /**
-     * Peer's media SSRCs.
-     */
-    private final MediaSSRCMap ssrcs = new MediaSSRCMap();
-
-    /**
-     * Peer's media SSRC groups.
-     */
-    private final MediaSSRCGroupMap ssrcGroups = new MediaSSRCGroupMap();
-
-    /**
-     * SSRCs received from other peers scheduled for later addition, because
-     * of the Jingle session not being ready at the point when SSRCs appeared in
-     * the conference.
-     */
-    private MediaSSRCMap ssrcsToAdd = new MediaSSRCMap();
-
-    /**
-     * SSRC groups received from other peers scheduled for later addition.
-     * @see #ssrcsToAdd
-     */
-    private MediaSSRCGroupMap ssrcGroupsToAdd = new MediaSSRCGroupMap();
-
-    /**
-     * SSRCs received from other peers scheduled for later removal, because
-     * of the Jingle session not being ready at the point when SSRCs appeared in
-     * the conference.
-     * FIXME: do we need that since these were never added ? - check
-     */
-    private MediaSSRCMap ssrcsToRemove = new MediaSSRCMap();
-
-    /**
-     * SSRC groups received from other peers scheduled for later removal.
-     * @see #ssrcsToRemove
-     */
-    private MediaSSRCGroupMap ssrcGroupsToRemove = new MediaSSRCGroupMap();
 
     /**
      * Stores information about bundled transport if {@link #hasBundleSupport()}
@@ -128,11 +94,6 @@ public class Participant
     private List<String> supportedFeatures = new ArrayList<>();
 
     /**
-     * Tells how many unique SSRCs per media participant is allowed to advertise
-     */
-    private final int maxSSRCCount;
-
-    /**
      * Remembers participant's muted status.
      */
     private boolean mutedStatus;
@@ -143,35 +104,23 @@ public class Participant
     private String displayName = null;
 
     /**
-     * Returns the endpoint ID for a participant in the videobridge(Colibri)
-     * context. This method can be used before <tt>Participant</tt> instance is
-     * created for the <tt>ChatRoomMember</tt>.
-     *
-     * @param chatRoomMember XMPP MUC chat room member which represent a
-     *                       <tt>Participant</tt>.
-     */
-    static public String getEndpointId(ChatRoomMember chatRoomMember)
-    {
-        return chatRoomMember.getName(); // XMPP MUC Nickname
-    }
-
-    /**
      * Creates new {@link Participant} for given chat room member.
      *
      * @param roomMember the {@link XmppChatMember} that represent this
      *                   participant in MUC conference room.
      *
-     * @param maxSSRCCount how many unique SSRCs per media this participant
+     * @param maxSourceCount how many unique sources per media this participant
      *                     instance will be allowed to advertise.
      */
     public Participant(JitsiMeetConference    conference,
                        XmppChatMember         roomMember,
-                       int                    maxSSRCCount)
+                       int maxSourceCount)
     {
+        super(conference.getLogger());
         Objects.requireNonNull(conference, "conference");
 
         this.roomMember = Objects.requireNonNull(roomMember, "roomMember");
-        this.maxSSRCCount = maxSSRCCount;
+        this.maxSourceCount = maxSourceCount;
         this.logger = Logger.getLogger(classLogger, conference.getLogger());
     }
 
@@ -200,163 +149,6 @@ public class Participant
     public XmppChatMember getChatMember()
     {
         return roomMember;
-    }
-
-    /**
-     * Returns currently stored map of RTP description to Colibri content name.
-     * @return a <tt>Map<String,RtpDescriptionPacketExtension></tt> which maps
-     *         the RTP descriptions to the corresponding Colibri content names.
-     */
-    public Map<String, RtpDescriptionPacketExtension> getRtpDescriptionMap()
-    {
-        return rtpDescriptionMap;
-    }
-
-    /**
-     * Extracts and stores RTP description for each content type from given
-     * Jingle contents.
-     * @param jingleContents the list of Jingle content packet extension from
-     *        <tt>Participant</tt>'s answer.
-     */
-    public void setRTPDescription(List<ContentPacketExtension> jingleContents)
-    {
-        Map<String, RtpDescriptionPacketExtension> rtpDescMap = new HashMap<>();
-
-        for (ContentPacketExtension content : jingleContents)
-        {
-            RtpDescriptionPacketExtension rtpDesc
-                = content.getFirstChildOfType(
-                        RtpDescriptionPacketExtension.class);
-
-            if (rtpDesc != null)
-            {
-                rtpDescMap.put(content.getName(), rtpDesc);
-            }
-        }
-
-        this.rtpDescriptionMap = rtpDescMap;
-    }
-
-    /**
-     * Removes given media SSRCs from this peer state.
-     * @param ssrcMap the SSRC map that contains the SSRCs to be removed.
-     * @return <tt>MediaSSRCMap</tt> which contains SSRCs removed from this map.
-     */
-    public MediaSSRCMap removeSSRCs(MediaSSRCMap ssrcMap)
-    {
-        return ssrcs.remove(ssrcMap);
-    }
-
-    /**
-     * Returns deep copy of this peer's media SSRC map.
-     */
-    public MediaSSRCMap getSSRCsCopy()
-    {
-        return ssrcs.copyDeep();
-    }
-
-    /**
-     * Returns deep copy of this peer's media SSRC group map.
-     */
-    public MediaSSRCGroupMap getSSRCGroupsCopy()
-    {
-        return ssrcGroups.copy();
-    }
-
-    /**
-     * Returns <tt>true</tt> if this peer has any not synchronized SSRCs
-     * scheduled for addition.
-     */
-    public boolean hasSsrcsToAdd()
-    {
-        return !ssrcsToAdd.isEmpty() || !ssrcGroupsToAdd.isEmpty();
-    }
-
-    /**
-     * Reset the queue that holds not synchronized SSRCs scheduled for future
-     * addition.
-     */
-    public void clearSsrcsToAdd()
-    {
-        ssrcsToAdd = new MediaSSRCMap();
-        ssrcGroupsToAdd = new MediaSSRCGroupMap();
-    }
-
-    /**
-     * Reset the queue that holds not synchronized SSRCs scheduled for future
-     * removal.
-     */
-    public void clearSsrcsToRemove()
-    {
-        ssrcsToRemove = new MediaSSRCMap();
-        ssrcGroupsToRemove = new MediaSSRCGroupMap();
-    }
-
-    /**
-     * Returns <tt>true</tt> if this peer has any not synchronized SSRCs
-     * scheduled for removal.
-     */
-    public boolean hasSsrcsToRemove()
-    {
-        return !ssrcsToRemove.isEmpty() || !ssrcGroupsToRemove.isEmpty();
-    }
-
-    /**
-     * Returns <tt>true</tt> if this peer has any not synchronized SSRCs
-     * scheduled for addition.
-     */
-    public MediaSSRCMap getSsrcsToAdd()
-    {
-        return ssrcsToAdd;
-    }
-
-    /**
-     * Returns <tt>true</tt> if this peer has any not synchronized SSRCs
-     * scheduled for removal.
-     */
-    public MediaSSRCMap getSsrcsToRemove()
-    {
-        return ssrcsToRemove;
-    }
-
-    /**
-     * Schedules SSRCs received from other peer for future 'source-add' update.
-     *
-     * @param ssrcMap the media SSRC map that contains SSRCs for future updates.
-     */
-    public void scheduleSSRCsToAdd(MediaSSRCMap ssrcMap)
-    {
-        ssrcsToAdd.add(ssrcMap);
-    }
-
-    /**
-     * Schedules SSRCs received from other peer for future 'source-remove'
-     * update.
-     *
-     * @param ssrcMap the media SSRC map that contains SSRCs for future updates.
-     */
-    public void scheduleSSRCsToRemove(MediaSSRCMap ssrcMap)
-    {
-        ssrcsToRemove.add(ssrcMap);
-    }
-
-    /**
-     * Sets information about Colibri channels allocated for this participant.
-     *
-     * @param colibriChannelsInfo the IQ that holds colibri channels state.
-     */
-    public void setColibriChannelsInfo(ColibriConferenceIQ colibriChannelsInfo)
-    {
-        this.colibriChannelsInfo = colibriChannelsInfo;
-    }
-
-    /**
-     * Returns {@link ColibriConferenceIQ} that describes Colibri channels
-     * allocated for this participant.
-     */
-    public ColibriConferenceIQ getColibriChannelsInfo()
-    {
-        return colibriChannelsInfo;
     }
 
     /**
@@ -476,126 +268,6 @@ public class Participant
     public Boolean isVideoMuted()
     {
         return roomMember.hasVideoMuted();
-    }
-
-    /**
-     * Returns the list of SSRC groups of given media type that belong ot this
-     * participant.
-     * @param media the name of media type("audio","video", ...)
-     * @return the list of {@link SSRCGroup} for given media type.
-     */
-    public List<SSRCGroup> getSSRCGroupsForMedia(String media)
-    {
-        return ssrcGroups.getSSRCGroupsForMedia(media);
-    }
-
-    /**
-     * Returns <tt>MediaSSRCGroupMap</tt> that contains the mapping of media
-     * SSRC groups that describe media of this participant.
-     */
-    public MediaSSRCGroupMap getSSRCGroups()
-    {
-        return ssrcGroups;
-    }
-
-    /**
-     * Adds SSRCs and SSRC groups for media described in given Jingle content
-     * list.
-     * @param contents the list of <tt>ContentPacketExtension</tt> that
-     *                 describes media SSRCs and SSRC groups.
-     * @return an array of two objects where first one is <tt>MediaSSRCMap</tt>
-     * contains the SSRCs that have been added and the second one is
-     * <tt>MediaSSRCGroupMap</tt> with <tt>SSRCGroup</tt>s added to this
-     * participant.
-     *
-     * @throws InvalidSSRCsException if there a critical problem has been found
-     * with SSRC and SSRC groups. This <tt>Participant</tt>'s state remains
-     * unchanged (no SSRCs or groups were added/removed).
-     */
-    public Object[] addSSRCsAndGroupsFromContent(
-            List<ContentPacketExtension> contents)
-        throws InvalidSSRCsException
-    {
-        SSRCValidator validator
-            = new SSRCValidator(
-                    getEndpointId(),
-                    this.ssrcs, this.ssrcGroups, maxSSRCCount, this.logger);
-
-        MediaSSRCMap ssrcsToAdd
-            = MediaSSRCMap.getSSRCsFromContent(contents);
-        MediaSSRCGroupMap groupsToAdd
-            = MediaSSRCGroupMap.getSSRCGroupsForContents(contents);
-
-        Object[] added
-            = validator.tryAddSSRCsAndGroups(ssrcsToAdd, groupsToAdd);
-        MediaSSRCMap addedSSRCs = (MediaSSRCMap) added[0];
-        MediaSSRCGroupMap addedGroups = (MediaSSRCGroupMap) added[1];
-
-        // Mark as SSRC owner
-        String roomJid = roomMember.getContactAddress();
-        for (String mediaType : addedSSRCs.getMediaTypes())
-        {
-            List<SourcePacketExtension> ssrcs
-                = addedSSRCs.getSSRCsForMedia(mediaType);
-            for (SourcePacketExtension ssrc : ssrcs)
-            {
-                SSRCSignaling.setSSRCOwner(ssrc, roomJid);
-            }
-        }
-
-        this.ssrcs.add(addedSSRCs);
-        this.ssrcGroups.add(addedGroups);
-
-        return added;
-    }
-
-    /**
-     * Schedules given media SSRC groups for later addition.
-     * @param ssrcGroups the <tt>MediaSSRCGroupMap</tt> to be scheduled for
-     *                   later addition.
-     */
-    public void scheduleSSRCGroupsToAdd(MediaSSRCGroupMap ssrcGroups)
-    {
-        ssrcGroupsToAdd.add(ssrcGroups);
-    }
-
-    /**
-     * Schedules given media SSRC groups for later removal.
-     * @param ssrcGroups the <tt>MediaSSRCGroupMap</tt> to be scheduled for
-     *                   later removal.
-     */
-    public void scheduleSSRCGroupsToRemove(MediaSSRCGroupMap ssrcGroups)
-    {
-        ssrcGroupsToRemove.add(ssrcGroups);
-    }
-
-    /**
-     * Returns the map of SSRC groups that are waiting for synchronization.
-     */
-    public MediaSSRCGroupMap getSSRCGroupsToAdd()
-    {
-        return ssrcGroupsToAdd;
-    }
-
-    /**
-     * Returns the map of SSRC groups that are waiting for being removed from
-     * peer session.
-     */
-    public MediaSSRCGroupMap getSsrcGroupsToRemove()
-    {
-        return ssrcGroupsToRemove;
-    }
-
-    /**
-     * Removes SSRC groups from this participant state.
-     * @param groupsToRemove the map of SSRC groups that will be removed
-     *                       from this participant media state description.
-     * @return <tt>MediaSSRCGroupMap</tt> which contains SSRC groups removed
-     *         from this map.
-     */
-    public MediaSSRCGroupMap removeSSRCGroups(MediaSSRCGroupMap groupsToRemove)
-    {
-        return ssrcGroups.remove(groupsToRemove);
     }
 
     /**
@@ -732,6 +404,15 @@ public class Participant
     }
 
     /**
+     * Returns the stats ID of the participant.
+     * @return the stats ID of the participant.
+     */
+    public String getStatId()
+    {
+        return roomMember.getStatsId();
+    }
+
+    /**
      * Sets the display name of the participant.
      * @param displayName the display name to set.
      */
@@ -744,8 +425,39 @@ public class Participant
      * Returns the MUC JID of this <tt>Participant</tt>.
      * @return full MUC address e.g. "room1@muc.server.net/nickname"
      */
-    public String getMucJid()
+    public EntityFullJid getMucJid()
     {
-        return roomMember.getContactAddress();
+        return roomMember.getOccupantJid();
     }
+
+    public void claimSources(MediaSourceMap sourceMap)
+    {
+        // Mark as source owner
+        Jid roomJid = roomMember.getOccupantJid();
+
+        sourceMap
+            .getMediaTypes()
+            .forEach(
+                mediaType -> sourceMap
+                    .getSourcesForMedia(mediaType)
+                    .forEach(
+                        source -> SSRCSignaling.setSSRCOwner(source, roomJid)));
+    }
+
+    /**
+     * @return {@code true} if the Jingle session with this participant has
+     * been established.
+     */
+    @Override
+    public boolean isSessionEstablished()
+    {
+        return jingleSession != null;
+    }
+
+    @Override
+    public String toString()
+    {
+        return "[Participant endpointId=" + getEndpointId();
+    }
+
 }

@@ -18,9 +18,12 @@
 package org.jitsi.jicofo;
 
 import mock.*;
+import net.java.sip.communicator.impl.configuration.*;
 import org.jitsi.jicofo.osgi.*;
 import org.jitsi.meet.*;
 import org.osgi.framework.*;
+
+import java.lang.reflect.*;
 
 /**
  * Helper class takes encapsulates OSGi specifics operations.
@@ -73,10 +76,13 @@ public class OSGiHandler
         if (deadlocked)
             throw new RuntimeException("Running on deadlocked stack");
 
+        System.setProperty("org.jitsi.jicofo.PING_INTERVAL", "0");
         System.setProperty(FocusManager.HOSTNAME_PNAME, "test.domain.net");
         System.setProperty(FocusManager.XMPP_DOMAIN_PNAME, "test.domain.net");
         System.setProperty(FocusManager.FOCUS_USER_DOMAIN_PNAME, "focusdomain");
         System.setProperty(FocusManager.FOCUS_USER_NAME_PNAME, "focus");
+        System.setProperty(ConfigurationActivator.PNAME_USE_PROPFILE_CONFIG,
+                "true");
 
         this.bundleActivator = new BundleActivator()
         {
@@ -106,6 +112,7 @@ public class OSGiHandler
         JicofoBundleConfig jicofoBundles = new JicofoBundleConfig();
         jicofoBundles.setUseMockProtocols(true);
         OSGi.setBundleConfig(jicofoBundles);
+        OSGi.setClassLoader(getPlatformClassLoader());
 
         OSGi.start(bundleActivator);
 
@@ -152,6 +159,24 @@ public class OSGiHandler
     public BundleContext bc()
     {
         return bc;
+    }
+
+    private ClassLoader getPlatformClassLoader() {
+        ClassLoader cl;
+        //JDK 9
+        try
+        {
+            Method getPlatformClassLoader =
+                    ClassLoader.class.getMethod("getPlatformClassLoader");
+            cl = (ClassLoader) getPlatformClassLoader.invoke(null);
+        }
+        catch (NoSuchMethodException | IllegalAccessException |
+                InvocationTargetException t)
+        {
+            // pre-JDK9
+            cl = ClassLoader.getSystemClassLoader();
+        }
+        return cl;
     }
 
     public boolean isDeadlocked()
