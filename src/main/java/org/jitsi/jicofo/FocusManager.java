@@ -187,7 +187,7 @@ public class FocusManager
      * FIXME: remove eventually if not used anymore
      * The list of {@link FocusAllocationListener}.
      */
-    private List<FocusAllocationListener> focusAllocListeners = new ArrayList<FocusAllocationListener>();
+    private FocusAllocationListener focusAllocListener;
 
     /**
      * XMPP protocol provider handler used by the focus.
@@ -618,9 +618,9 @@ public class FocusManager
      * allocation/disposal.
      * @param l the listener instance to be registered.
      */
-    public synchronized void setFocusAllocationListener(FocusAllocationListener l)
+    public void setFocusAllocationListener(FocusAllocationListener l)
     {
-        this.focusAllocListeners.add(l);
+        this.focusAllocListener = l;
     }
 
     /**
