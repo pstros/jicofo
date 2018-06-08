@@ -521,7 +521,7 @@ public class FocusManager implements JitsiMeetConferenceImpl.ConferenceListener,
      * @param l the listener instance to be registered.
      */
     public synchronized void setFocusAllocationListener(FocusAllocationListener l) {
-        logger.info("jm setFocusAllocationListener " + l);
+        logger.info("jm setFocusAllocationListener ");
         this.focusAllocListeners.add(l);
     }
 
