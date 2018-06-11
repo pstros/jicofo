@@ -181,6 +181,10 @@ public abstract class AbstractOperationSetJingle
         {
             GroupPacketExtension group
                 = GroupPacketExtension.createBundleGroup(contents);
+            logger.info("POOP");
+            logger.info(contents);
+            logger.info(group);
+            logger.info("POOP");
 
             inviteIQ.addExtension(group);
 
