@@ -183,7 +183,6 @@ public abstract class AbstractOperationSetJingle
                 = GroupPacketExtension.createBundleGroup(contents);
             logger.info("POOP");
             logger.info(contents);
-            logger.info(contents.toXML());
             logger.info(group);
             logger.info(group.toXML());
             logger.info("POOP");
