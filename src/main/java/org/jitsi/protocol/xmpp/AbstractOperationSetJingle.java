@@ -187,10 +187,6 @@ public abstract class AbstractOperationSetJingle
                 content.setNamespace(null);
             }
 
-            logger.info("POOP");
-            logger.info(group.toXML());
-            logger.info("POOP");
-
             inviteIQ.addExtension(group);
 
             for (ContentPacketExtension content : contents)
