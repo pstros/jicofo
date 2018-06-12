@@ -183,6 +183,8 @@ public abstract class AbstractOperationSetJingle
             {
                 logger.info("SCOOP");
                 logger.info(content.toXML());
+                content.setNamespace(null);
+                logger.info(content.toXML());
                 logger.info("SCOOP");
             }
 
