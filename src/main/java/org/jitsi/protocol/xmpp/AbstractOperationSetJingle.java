@@ -179,8 +179,16 @@ public abstract class AbstractOperationSetJingle
 
         if (useBundle)
         {
+            for (ContentPacketExtension content : contents)
+            {
+                logger.info("SCOOP");
+                logger.info(content.toXML());
+                logger.info("SCOOP");
+            }
+
             GroupPacketExtension group
                 = GroupPacketExtension.createBundleGroup(contents);
+
             logger.info("POOP");
             logger.info(contents);
             logger.info(group);
