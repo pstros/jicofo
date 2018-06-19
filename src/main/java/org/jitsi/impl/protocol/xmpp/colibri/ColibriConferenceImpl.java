@@ -943,6 +943,8 @@ public class ColibriConferenceImpl
             {
                 for (String contentName : descriptionMap.keySet())
                 {
+                    logger.error(contentName);
+                    logger.error(localChannelsInfo.getContent(contentName).getChannels());
                     ColibriConferenceIQ.Channel channel
                         = localChannelsInfo.getContent(contentName)
                             .getChannels().get(0);

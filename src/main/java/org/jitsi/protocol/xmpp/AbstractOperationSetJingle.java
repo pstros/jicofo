@@ -182,6 +182,11 @@ public abstract class AbstractOperationSetJingle
             GroupPacketExtension group
                 = GroupPacketExtension.createBundleGroup(contents);
 
+            for (ContentPacketExtension content : group.getContents())
+            {
+                content.setNamespace(null);
+            }
+
             inviteIQ.addExtension(group);
 
             for (ContentPacketExtension content : contents)
