@@ -23,8 +23,23 @@ package org.jitsi.jicofo.discovery;
  * @author Pawel Domas
  */
 public class Version
-    extends org.jivesoftware.smackx.packet.Version
+    extends org.jivesoftware.smackx.iqversion.packet.Version
 {
+    /**
+     * Creates empty version instance.
+     */
+    public Version()
+    {}
+
+    /**
+     * Gets original version to construct the version.
+     * @param original the original version package
+     */
+    public Version(org.jivesoftware.smackx.iqversion.packet.Version original)
+    {
+        super(original);
+    }
+
     /**
      * Creates a string representation of this <tt>Version</tt> IQ which will
      * include the application name, version number and OS.
@@ -33,14 +48,5 @@ public class Version
     public String getNameVersionOsString()
     {
         return getName() + "(" + getVersion() + "," + getOs() + ")";
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public String toString()
-    {
-        return "Version[" + getNameVersionOsString() + "@" + hashCode();
     }
 }

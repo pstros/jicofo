@@ -27,6 +27,7 @@ import org.jitsi.jicofo.event.*;
 import org.jitsi.osgi.*;
 import org.jitsi.service.version.*;
 
+import org.jxmpp.jid.*;
 import org.osgi.framework.*;
 
 import java.util.*;
@@ -130,10 +131,11 @@ public class VersionBroadcaster
             return;
         }
 
-        String roomJid = (String) event.getProperty(EventFactory.ROOM_JID_KEY);
+        EntityBareJid roomJid
+                = (EntityBareJid)event.getProperty(EventFactory.ROOM_JID_KEY);
 
-        JitsiMeetConferenceImpl conference
-            = (JitsiMeetConferenceImpl) focusManager.getConference(roomJid);
+        JitsiMeetConference conference
+            = focusManager.getConference(roomJid);
         if (conference == null)
         {
             logger.error("Conference is null");
@@ -171,8 +173,8 @@ public class VersionBroadcaster
 
         // Videobridge
         // It is not be reported for FOCUS_JOINED_ROOM_TOPIC
-        String bridgeJid
-            = (String) event.getProperty(EventFactory.BRIDGE_JID_KEY);
+        Jid bridgeJid
+                = (Jid)event.getProperty(EventFactory.BRIDGE_JID_KEY);
         Version jvbVersion
             = bridgeJid == null
                 ? null : meetServices.getBridgeVersion(bridgeJid);

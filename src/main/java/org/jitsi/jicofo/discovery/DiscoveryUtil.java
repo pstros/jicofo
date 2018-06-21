@@ -18,7 +18,6 @@
 package org.jitsi.jicofo.discovery;
 
 import net.java.sip.communicator.impl.protocol.jabber.extensions.health.*;
-import net.java.sip.communicator.impl.protocol.jabber.*;
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.util.*;
 
@@ -26,6 +25,7 @@ import org.jitsi.protocol.xmpp.*;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.packet.*;
+import org.jxmpp.jid.*;
 
 import java.util.*;
 
@@ -110,18 +110,18 @@ public class DiscoveryUtil
      */
     public final static String[] VERSION_FEATURES = new String[]
         {
-            ProtocolProviderServiceJabberImpl.URN_XMPP_IQ_VERSION
+            Version.NAMESPACE
         };
 
     /**
      * Gets the list of features supported by participant. If we fail to 
-     * obtain it due to network failure default feature list is returned. 
-     * @param protocolProvider protocol provider service instance that will 
+     * obtain it due to network failure default feature list is returned.
+     * @param protocolProvider protocol provider service instance that will
      *        be used for discovery.
      * @param address XMPP address of the participant.
      */
     public static List<String> discoverParticipantFeatures
-        (ProtocolProviderService protocolProvider, String address)
+        (ProtocolProviderService protocolProvider, EntityFullJid address)
     {
         OperationSetSimpleCaps disco 
             = protocolProvider.getOperationSet(OperationSetSimpleCaps.class);
@@ -155,8 +155,7 @@ public class DiscoveryUtil
     /**
      * Discovers version of given <tt>jid</tt>.
      *
-     * @param xmppOpSet the direct smack operation set which will be used to
-     *                  send the query.
+     * @param connection the connection which will be used to send the query.
      * @param jid       the JID to which version query wil be sent.
      * @param features  the list of <tt>jid</tt> feature which will be used to
      *                  determine support for the version IQ.
@@ -165,24 +164,21 @@ public class DiscoveryUtil
      *         we the query was successful or <tt>null</tt> otherwise.
      */
     static public Version discoverVersion(
-            OperationSetDirectSmackXmpp    xmppOpSet,
-            String                               jid,
-            List<String>                    features )
+            XmppConnection                connection,
+            Jid                           jid,
+            List<String>                  features)
     {
         // If the bridge supports version IQ query it's version
         if (DiscoveryUtil.checkFeatureSupport(VERSION_FEATURES, features))
         {
             Version versionIq = new Version();
-            versionIq.setType(IQ.Type.GET);
+            versionIq.setType(IQ.Type.get);
             versionIq.setTo(jid);
 
-            Packet response;
+            Stanza response;
             try
             {
-                response
-                    = xmppOpSet
-                        .getXmppConnection()
-                        .sendPacketAndGetReply(versionIq);
+                response = connection.sendPacketAndGetReply(versionIq);
             }
             catch (OperationFailedException e)
             {
@@ -255,6 +251,8 @@ public class DiscoveryUtil
      */
     static public boolean areTheSame(List<String> list1, List<String> list2)
     {
-        return list1.size() == list2.size() && list2.containsAll(list1);
+        return list1.size() == list2.size()
+            && list2.containsAll(list1)
+            && list1.containsAll(list2);
     }
 }

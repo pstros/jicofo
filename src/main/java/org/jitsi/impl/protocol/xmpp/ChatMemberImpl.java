@@ -28,6 +28,8 @@ import org.jitsi.protocol.xmpp.*;
 
 import org.jivesoftware.smack.packet.*;
 import org.jivesoftware.smackx.muc.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.parts.*;
 
 /**
  * Stripped Smack implementation of {@link ChatRoomMember}.
@@ -43,9 +45,15 @@ public class ChatMemberImpl
     static final private Logger logger = Logger.getLogger(ChatMemberImpl.class);
 
     /**
-     * The MUC nickname used by this member.
+     * The resource part of this {@link ChatMemberImpl}'s JID in the MUC.
      */
-    private final String nickname;
+    private final Resourcepart resourcepart;
+
+    /**
+     * The region (e.g. "us-east") of this {@link ChatMemberImpl}, advertised
+     * by the remote peer in presence.
+     */
+    private String region;
 
     /**
      * The chat room of the member.
@@ -61,13 +69,13 @@ public class ChatMemberImpl
      * Full MUC address:
      * room_name@muc.server.net/nickname
      */
-    private final String address;
+    private final EntityFullJid occupantJid;
 
     /**
-     * Caches real JID of the participant if we're able to see it(not the MUC
-     * address stored in {@link ChatMemberImpl#address}).
+     * Caches real JID of the participant if we're able to see it (not the MUC
+     * address stored in {@link ChatMemberImpl#occupantJid}).
      */
-    private String memberJid = null;
+    private Jid jid = null;
 
     /**
      * Stores the last <tt>Presence</tt> processed by this
@@ -87,11 +95,16 @@ public class ChatMemberImpl
      */
     private Boolean videoMuted;
 
-    public ChatMemberImpl(String participant, ChatRoomImpl chatRoom,
-        int joinOrderNumber)
+    /**
+     * Stores statistics ID for the member.
+     */
+    private String statsId;
+
+    public ChatMemberImpl(EntityFullJid fullJid, ChatRoomImpl chatRoom,
+                          int joinOrderNumber)
     {
-        this.address = participant;
-        this.nickname = participant.substring(participant.lastIndexOf("/")+1);
+        this.occupantJid = fullJid;
+        this.resourcepart = fullJid.getResourceOrThrow();
         this.chatRoom = chatRoom;
         this.joinOrderNumber = joinOrderNumber;
     }
@@ -120,13 +133,22 @@ public class ChatMemberImpl
     @Override
     public String getContactAddress()
     {
-        return address;
+        return occupantJid.toString();
     }
 
+    public EntityFullJid getOccupantJid()
+    {
+        return occupantJid;
+    }
+
+    /**
+     * @return the resource part of the MUC JID of this {@link ChatMemberImpl}
+     * as a string.
+     */
     @Override
     public String getName()
     {
-        return nickname;
+        return resourcepart.toString();
     }
 
     @Override
@@ -144,15 +166,20 @@ public class ChatMemberImpl
     @Override
     public ChatRoomMemberRole getRole()
     {
-        if(this.role == null)
+        if (this.role == null)
         {
             Occupant o = chatRoom.getOccupant(this);
 
-            if(o == null)
+            if (o == null)
+            {
                 return ChatRoomMemberRole.GUEST;
+            }
             else
-                this.role = ChatRoomJabberImpl
-                    .smackRoleToScRole(o.getRole(), o.getAffiliation());
+            {
+                this.role
+                    = ChatRoomJabberImpl.smackRoleToScRole(
+                        o.getRole(), o.getAffiliation());
+            }
         }
         return this.role;
     }
@@ -179,13 +206,19 @@ public class ChatMemberImpl
     }
 
     @Override
-    public String getJabberID()
+    public String getDisplayName()
     {
-        if (memberJid == null)
+        return null;
+    }
+
+    @Override
+    public Jid getJid()
+    {
+        if (jid == null)
         {
-            memberJid = chatRoom.getMemberJid(address);
+            jid = chatRoom.getJid(occupantJid);
         }
-        return memberJid;
+        return jid;
     }
 
     @Override
@@ -220,20 +253,19 @@ public class ChatMemberImpl
      */
     void processPresence(Presence presence)
     {
-        if (!address.equals(presence.getFrom()))
+        if (!occupantJid.equals(presence.getFrom()))
         {
             throw new IllegalArgumentException(
                     String.format("Presence for another member: %s, my jid: %s",
-                            presence.getFrom(), address));
+                                  presence.getFrom(), occupantJid));
         }
 
         this.presence = presence;
 
         VideoMutedExtension videoMutedExt
-            = (VideoMutedExtension)
-                presence.getExtension(
-                    VideoMutedExtension.ELEMENT_NAME,
-                    VideoMutedExtension.NAMESPACE);
+            = presence.getExtension(
+                VideoMutedExtension.ELEMENT_NAME,
+                VideoMutedExtension.NAMESPACE);
 
         if (videoMutedExt != null)
         {
@@ -248,10 +280,9 @@ public class ChatMemberImpl
         }
 
         UserInfoPacketExt userInfoPacketExt
-            = (UserInfoPacketExt)
-                presence.getExtension(
-                        UserInfoPacketExt.ELEMENT_NAME,
-                        UserInfoPacketExt.NAMESPACE);
+            = presence.getExtension(
+                    UserInfoPacketExt.ELEMENT_NAME,
+                    UserInfoPacketExt.NAMESPACE);
         if (userInfoPacketExt != null)
         {
             Boolean newStatus = userInfoPacketExt.isRobot();
@@ -262,6 +293,58 @@ public class ChatMemberImpl
                 this.robot = newStatus;
             }
         }
+
+        RegionPacketExtension regionPE
+            = presence.getExtension(
+                    RegionPacketExtension.ELEMENT_NAME,
+                    RegionPacketExtension.NAMESPACE);
+        if (regionPE != null)
+        {
+            region = regionPE.getRegionId();
+        }
+
+        StartMutedPacketExtension ext
+            = presence.getExtension(
+            StartMutedPacketExtension.ELEMENT_NAME,
+            StartMutedPacketExtension.NAMESPACE);
+
+        if (ext != null)
+        {
+            boolean[] startMuted
+                = { ext.getAudioMuted(), ext.getVideoMuted() };
+
+            if (getRole().compareTo(ChatRoomMemberRole.MODERATOR) < 0)
+            {
+                chatRoom.setStartMuted(startMuted);
+            }
+        }
+
+        StatsId statsIdPacketExt
+            = presence.getExtension(
+                    StatsId.ELEMENT_NAME,
+                    StatsId.NAMESPACE);
+        if (statsIdPacketExt != null)
+        {
+            statsId = statsIdPacketExt.getStatsId();
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String getRegion()
+    {
+        return region;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String getStatsId()
+    {
+        return statsId;
     }
 
     /**
@@ -271,6 +354,6 @@ public class ChatMemberImpl
     public String toString()
     {
         return String.format(
-                "ChatMember[%s, jid: %s]@%s", address, memberJid, hashCode());
+            "ChatMember[%s, jid: %s]@%s", occupantJid, jid, hashCode());
     }
 }
