@@ -34,6 +34,8 @@ import org.jitsi.util.*;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.packet.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.parts.*;
 
 import java.util.*;
 
@@ -65,7 +67,7 @@ public class ColibriConferenceImpl
     /**
      * XMPP address of videobridge component.
      */
-    private String jitsiVideobridge;
+    private Jid jitsiVideobridge;
 
     /**
      * The {@link ColibriConferenceIQ} that stores the state of whole conference
@@ -102,6 +104,10 @@ public class ColibriConferenceImpl
      * The error code produced by the allocator thread which is to be passed to
      * the waiting threads, so that they will throw
      * {@link OperationFailedException} consistent with the allocator thread.
+     *
+     * Note: this and {@link #allocChannelsErrorMsg} are only used to modify
+     * the message logged when an exception is thrown. They are NOT used to
+     * decide whether to throw an exception or not.
      */
     private int allocChannelsErrorCode = -1;
 
@@ -119,8 +125,10 @@ public class ColibriConferenceImpl
         = new ColibriBuilder(conferenceState);
 
     /**
-     * Flag used to figure out if Colibri conference has been allocated during
-     * last {@link #createColibriChannels(boolean, String, boolean, List)} call.
+     * Flag used to figure out if Colibri conference has been
+     * allocated during last
+     * {@link #createColibriChannels(boolean, String, String, boolean, List)}
+     * call.
      */
     private boolean justAllocated = false;
 
@@ -137,6 +145,11 @@ public class ColibriConferenceImpl
     private int videoChannels;
 
     /**
+     * The global ID of the conference.
+     */
+    private String gid;
+
+    /**
      * Creates new instance of <tt>ColibriConferenceImpl</tt>.
      * @param connection XMPP connection object that wil be used by the new
      *        instance to communicate.
@@ -148,6 +161,16 @@ public class ColibriConferenceImpl
     {
         this.connection = Objects.requireNonNull(connection, "connection");
         this.eventAdmin = Objects.requireNonNull(eventAdmin, "eventAdmin");
+    }
+
+    /**
+     * Sets the "global" ID of the conference.
+     * @param gid the value to set.
+     */
+    public void setGID(String gid)
+    {
+        this.gid = gid;
+        conferenceState.setGID(gid);
     }
 
     /**
@@ -168,7 +191,7 @@ public class ColibriConferenceImpl
             logger.warn("Not doing " + operationName + " - instance disposed");
             return true;
         }
-        if (StringUtils.isNullOrEmpty(jitsiVideobridge))
+        if (jitsiVideobridge == null)
         {
             logger.error(
                 "Not doing " + operationName + " - bridge not initialized");
@@ -181,7 +204,7 @@ public class ColibriConferenceImpl
      * {@inheritDoc}
      */
     @Override
-    public void setJitsiVideobridge(String videobridgeJid)
+    public void setJitsiVideobridge(Jid videobridgeJid)
     {
         if (!StringUtils.isNullOrEmpty(conferenceState.getID()))
         {
@@ -195,7 +218,7 @@ public class ColibriConferenceImpl
      * {@inheritDoc}
      */
     @Override
-    public String getJitsiVideobridge()
+    public Jid getJitsiVideobridge()
     {
         return this.jitsiVideobridge;
     }
@@ -206,10 +229,7 @@ public class ColibriConferenceImpl
     @Override
     public String getConferenceId()
     {
-        synchronized (syncRoot)
-        {
-            return conferenceState.getID();
-        }
+        return conferenceState.getID();
     }
 
     /**
@@ -227,13 +247,20 @@ public class ColibriConferenceImpl
 
     /**
      * {@inheritDoc}
+     * </p>
+     * Blocks until a reply is received (and might also block waiting for
+     * the conference to be allocated before sending the request).
      */
     @Override
     public ColibriConferenceIQ createColibriChannels(
             boolean useBundle,
-            String endpointName,
+            String endpointId,
+            String statsId,
             boolean peerIsInitiator,
-            List<ContentPacketExtension> contents)
+            List<ContentPacketExtension> contents,
+            Map<String, List<SourcePacketExtension>> sourceMap,
+            Map<String, List<SourceGroupPacketExtension>> sourceGroupsMap,
+            List<String> octoRelayIds)
         throws OperationFailedException
     {
         ColibriConferenceIQ allocateRequest;
@@ -241,49 +268,58 @@ public class ColibriConferenceImpl
         final int newVideoChannelsCount
             = JingleOfferFactory.containsVideoContent(contents) ? 1 : 0;
 
+        boolean conferenceExisted;
         try
         {
             synchronized (syncRoot)
             {
                 // Only if not in 'disposed' state
                 if (checkIfDisposed("createColibriChannels"))
-                    return null;
-
-                synchronized (stateEstimationSync)
                 {
-                    trackVideoChannelsAddedRemoved(newVideoChannelsCount);
+                    return null;
                 }
 
-                acquireCreateConferenceSemaphore(endpointName);
+                if (newVideoChannelsCount != 0)
+                {
+                    synchronized (stateEstimationSync)
+                    {
+                        trackVideoChannelsAddedRemoved(newVideoChannelsCount);
+                    }
+                }
+
+                conferenceExisted
+                    = !acquireCreateConferenceSemaphore(endpointId);
 
                 colibriBuilder.reset();
 
                 colibriBuilder.addAllocateChannelsReq(
-                    useBundle, endpointName, peerIsInitiator, contents);
+                    useBundle,
+                    endpointId,
+                    statsId,
+                    peerIsInitiator,
+                    contents,
+                    sourceMap,
+                    sourceGroupsMap,
+                    octoRelayIds);
 
                 allocateRequest = colibriBuilder.getRequest(jitsiVideobridge);
             }
 
             if (logger.isDebugEnabled())
+            {
                 logger.debug(Thread.currentThread() + " sending alloc request");
+            }
 
             logRequest("Channel allocate request", allocateRequest);
 
             // FIXME retry allocation on timeout ?
-            Packet response = sendAllocRequest(endpointName, allocateRequest);
+            Stanza response = sendAllocRequest(endpointId, allocateRequest);
 
             logResponse("Channel allocate response", response);
-
-            if (logger.isDebugEnabled())
-                logger.debug(
-                    Thread.currentThread() +
-                        " - have alloc response? " + (response != null));
 
             // Verify the response and throw OperationFailedException
             // if it's not a success
             maybeThrowOperationFailed(response);
-
-            boolean conferenceExisted = getConferenceId() != null;
 
             /*
              * Update the complete ColibriConferenceIQ representation maintained by
@@ -339,7 +375,7 @@ public class ColibriConferenceImpl
         }
         finally
         {
-            releaseCreateConferenceSemaphore(endpointName);
+            releaseCreateConferenceSemaphore(endpointId);
         }
     }
 
@@ -359,53 +395,65 @@ public class ColibriConferenceImpl
      * error that may indicate that the JVB instance is faulty.
      *
      */
-    private void maybeThrowOperationFailed(Packet response)
+    private void maybeThrowOperationFailed(Stanza response)
         throws OperationFailedException
     {
-        if (response == null)
+        // This code block must be protected, because in the last "if" a
+        // decision is made based on the value of allocChannelsErrorCode, which
+        // could have been written by another thread.
+        synchronized (syncRoot)
         {
-            allocChannelsErrorCode
-                = OperationFailedException.NETWORK_FAILURE;
-            allocChannelsErrorMsg
-                = "Failed to allocate colibri channels: response is null."
-                + " Maybe the response timed out.";
-        }
-        else if (response.getError() != null)
-        {
-            XMPPError error = response.getError();
-            if (XMPPError.Condition
-                    .bad_request.toString().equals(error.getCondition()))
+            if (response == null)
             {
                 allocChannelsErrorCode
-                    = OperationFailedException.ILLEGAL_ARGUMENT;
+                    = OperationFailedException.NETWORK_FAILURE;
                 allocChannelsErrorMsg
-                    = "Failed to allocate colibri channels - bad request: "
-                            + response.toXML();
+                    = "Failed to allocate colibri channels: response is null."
+                            + " Maybe the response timed out.";
             }
-            else
+            else if (response.getError() != null)
+            {
+                XMPPError error = response.getError();
+                if (XMPPError.Condition
+                    .bad_request.equals(error.getCondition()))
+                {
+                    allocChannelsErrorCode
+                        = OperationFailedException.ILLEGAL_ARGUMENT;
+                    allocChannelsErrorMsg
+                        = "Failed to allocate colibri channels - bad request: "
+                                + response.toXML();
+                }
+                else
+                {
+                    allocChannelsErrorCode
+                        = OperationFailedException.GENERAL_ERROR;
+                    allocChannelsErrorMsg
+                        = "Failed to allocate colibri channels: "
+                                + response.toXML();
+                }
+            }
+            else if (!(response instanceof ColibriConferenceIQ))
             {
                 allocChannelsErrorCode = OperationFailedException.GENERAL_ERROR;
                 allocChannelsErrorMsg
-                    = "Failed to allocate colibri channels: "
-                            + response.toXML();
+                    = "Failed to allocate colibri channels: response is not a"
+                            + " colibri conference";
+            }
+            else
+            {
+                allocChannelsErrorCode = -1;
+                allocChannelsErrorMsg = null;
+            }
+
+            if (allocChannelsErrorCode != -1)
+            {
+                throw new OperationFailedException(
+                    allocChannelsErrorMsg, allocChannelsErrorCode,
+                    response == null
+                        ? null
+                        : new Exception(response.toXML().toString()));
             }
         }
-        else if (!(response instanceof ColibriConferenceIQ))
-        {
-            allocChannelsErrorCode = OperationFailedException.GENERAL_ERROR;
-            allocChannelsErrorMsg
-                = "Failed to allocate colibri channels: response is not a"
-                        + " colibri conference";
-        }
-        else
-        {
-            allocChannelsErrorCode = -1;
-            allocChannelsErrorMsg = null;
-        }
-
-        if (allocChannelsErrorCode != -1)
-            throw new OperationFailedException(
-                    allocChannelsErrorMsg, allocChannelsErrorCode);
     }
 
     /**
@@ -415,7 +463,7 @@ public class ColibriConferenceImpl
      *
      * Methods exposed for unit test purpose.
      *
-     * @param endpointName the name of Colibri endpoint(conference participant)
+     * @param endpointId the ID of the Colibri endpoint (conference participant)
      *
      * @return <tt>true</tt> if current thread is conference creator.
      *
@@ -423,7 +471,7 @@ public class ColibriConferenceImpl
      *         to allocate new conference and current thread has been waiting
      *         to acquire the semaphore.
      */
-    protected boolean acquireCreateConferenceSemaphore(String endpointName)
+    protected boolean acquireCreateConferenceSemaphore(String endpointId)
         throws OperationFailedException
     {
         return createConfSemaphore.acquire();
@@ -433,29 +481,30 @@ public class ColibriConferenceImpl
      * Releases "create conference semaphore". Must be called to release the
      * semaphore possibly in "finally" block.
      *
-     * @param endpointName the name of colibri conference endpoint(participant)
+     * @param endpointId the ID of the colibri conference endpoint(participant)
      */
-    protected void releaseCreateConferenceSemaphore(String endpointName)
+    protected void releaseCreateConferenceSemaphore(String endpointId)
     {
         createConfSemaphore.release();
     }
 
     /**
      * Sends Colibri packet and waits for response in
-     * {@link #createColibriChannels(boolean, String, boolean, List)} call.
+     * {@link #createColibriChannels(boolean, String, String, boolean, List)}
+     * call.
      *
      * Exposed for unit tests purpose.
      *
-     * @param endpointName Colibri endpoint name(participant)
+     * @param endpointId The ID of the Colibri endpoint.
      * @param request Colibri IQ to be send towards the bridge.
      *
      * @return <tt>Packet</tt> which is JVB response or <tt>null</tt> if
      *         the request timed out.
      *
      * @throws OperationFailedException see throws description of
-     * {@link XmppConnection#sendPacketAndGetReply(Packet)}.
+     * {@link XmppConnection#sendPacketAndGetReply(IQ)}.
      */
-    protected Packet sendAllocRequest(String endpointName,
+    protected Stanza sendAllocRequest(String endpointId,
                                       ColibriConferenceIQ request)
         throws OperationFailedException
     {
@@ -469,19 +518,21 @@ public class ColibriConferenceImpl
     {
         synchronized (syncRoot)
         {
-            if (this.justAllocated)
+            if (justAllocated)
             {
-                this.justAllocated = false;
+                justAllocated = false;
                 return true;
             }
             return false;
         }
     }
 
-    private void logResponse(String message, Packet response)
+    private void logResponse(String message, Stanza response)
     {
         if (!logger.isDebugEnabled())
+        {
             return;
+        }
 
         String responseXml = IQUtils.responseToXML(response);
 
@@ -493,35 +544,42 @@ public class ColibriConferenceImpl
     private void logRequest(String message, IQ iq)
     {
         if (logger.isDebugEnabled())
-            logger.debug(message + "\n" + iq.toXML().replace(">",">\n"));
+        {
+            logger.debug(message + "\n" + iq.toXML().toString()
+                    .replace(">",">\n"));
+        }
     }
 
     /**
      * {@inheritDoc}
+     * </t>
+     * Does not block or wait for a response.
      */
     @Override
     public void expireChannels(ColibriConferenceIQ channelInfo)
     {
-        ColibriConferenceIQ iq;
+        ColibriConferenceIQ request;
 
         synchronized (syncRoot)
         {
             // Only if not in 'disposed' state
             if (checkIfDisposed("expireChannels"))
+            {
                 return;
+            }
 
             colibriBuilder.reset();
 
             colibriBuilder.addExpireChannelsReq(channelInfo);
 
-            iq = colibriBuilder.getRequest(jitsiVideobridge);
+            request = colibriBuilder.getRequest(jitsiVideobridge);
         }
 
-        if (iq != null)
+        if (request != null)
         {
-            logRequest("Expire peer channels", iq);
+            logRequest("Expire peer channels", request);
 
-            connection.sendPacket(iq);
+            connection.sendStanza(request);
 
             synchronized (stateEstimationSync)
             {
@@ -536,84 +594,106 @@ public class ColibriConferenceImpl
 
     /**
      * {@inheritDoc}
+     * </t>
+     * Does not block or wait for a response.
      */
     @Override
     public void updateRtpDescription(
-            Map<String, RtpDescriptionPacketExtension> map,
+            Map<String, RtpDescriptionPacketExtension> descriptionMap,
             ColibriConferenceIQ localChannelsInfo)
     {
-        ColibriConferenceIQ iq;
+        ColibriConferenceIQ request;
 
         synchronized (syncRoot)
         {
             // Only if not in 'disposed' state
             if (checkIfDisposed("updateRtpDescription"))
+            {
                 return;
+            }
 
             colibriBuilder.reset();
 
-            colibriBuilder.addRtpDescription(map, localChannelsInfo);
+            for (String contentName : descriptionMap.keySet())
+            {
+                ColibriConferenceIQ.Channel channel
+                    = localChannelsInfo.getContent(contentName)
+                        .getChannels().get(0);
+                colibriBuilder.addRtpDescription(
+                        descriptionMap.get(contentName),
+                        contentName,
+                        channel);
+            }
 
-            iq = colibriBuilder.getRequest(jitsiVideobridge);
+            request = colibriBuilder.getRequest(jitsiVideobridge);
         }
 
-        if (iq != null)
+        if (request != null)
         {
-            logRequest("Sending RTP desc update: ", iq);
+            logRequest("Sending RTP desc update: ", request);
 
-            connection.sendPacket(iq);
+            connection.sendStanza(request);
         }
     }
 
     /**
      * {@inheritDoc}
+     * </t>
+     * Does not block or wait for a response.
      */
     @Override
     public void updateTransportInfo(
-            Map<String, IceUdpTransportPacketExtension> map,
+            Map<String, IceUdpTransportPacketExtension> transportMap,
             ColibriConferenceIQ localChannelsInfo)
     {
-        ColibriConferenceIQ iq;
+        ColibriConferenceIQ request;
 
         synchronized (syncRoot)
         {
             if (checkIfDisposed("updateTransportInfo"))
+            {
                 return;
+            }
 
             colibriBuilder.reset();
 
-            colibriBuilder.addTransportUpdateReq(map, localChannelsInfo);
+            colibriBuilder
+                .addTransportUpdateReq(transportMap, localChannelsInfo);
 
-            iq = colibriBuilder.getRequest(jitsiVideobridge);
+            request = colibriBuilder.getRequest(jitsiVideobridge);
         }
 
-        if (iq != null)
+        if (request != null)
         {
-            logRequest("Sending transport info update: ", iq);
+            logRequest("Sending transport info update: ", request);
 
-            connection.sendPacket(iq);
+            connection.sendStanza(request);
         }
     }
 
     /**
      * {@inheritDoc}
+     * </t>
+     * Does not block or wait for a response.
      */
     @Override
-    public void updateSourcesInfo(MediaSSRCMap ssrcs,
-                                  MediaSSRCGroupMap ssrcGroups,
+    public void updateSourcesInfo(MediaSourceMap sources,
+                                  MediaSourceGroupMap sourceGroups,
                                   ColibriConferenceIQ localChannelsInfo)
     {
-        ColibriConferenceIQ iq;
+        ColibriConferenceIQ request;
 
         synchronized (syncRoot)
         {
             if (checkIfDisposed("updateSourcesInfo"))
+            {
                 return;
+            }
 
             if (StringUtils.isNullOrEmpty(conferenceState.getID()))
             {
                 logger.error(
-                        "Have not updated SSRC info on the bridge - "
+                        "Have not updated source info on the bridge - "
                             + "no conference in progress");
                 return;
             }
@@ -622,75 +702,83 @@ public class ColibriConferenceImpl
 
             boolean send = false;
 
-            // ssrcs
-            if (ssrcs != null
-                    && colibriBuilder.addSSSRCInfo(
-                            ssrcs.toMap(), localChannelsInfo))
+            // sources
+            if (sources != null
+                    && colibriBuilder.addSourceInfo(
+                            sources.toMap(), localChannelsInfo))
             {
                 send = true;
             }
             // ssrcGroups
-            if (ssrcGroups != null
-                    && colibriBuilder.addSSSRCGroupsInfo(
-                            ssrcGroups.toMap(), localChannelsInfo))
+            if (sourceGroups != null
+                    && colibriBuilder.addSourceGroupsInfo(
+                            sourceGroups.toMap(), localChannelsInfo))
             {
                 send = true;
             }
 
-            iq = send ? colibriBuilder.getRequest(jitsiVideobridge) : null;
+            request = send ? colibriBuilder.getRequest(jitsiVideobridge) : null;
         }
 
-        if (iq != null)
+        if (request != null)
         {
-            logRequest("Sending SSRC update: ", iq);
+            logRequest("Sending source update: ", request);
 
-            connection.sendPacket(iq);
+            connection.sendStanza(request);
         }
     }
 
     /**
      * {@inheritDoc}
+     * </t>
+     * Does not block or wait for a response.
      */
     @Override
     public void updateBundleTransportInfo(
             IceUdpTransportPacketExtension transport,
-            ColibriConferenceIQ            localChannelsInfo)
+            String channelBundleId)
     {
-        ColibriConferenceIQ iq;
+        ColibriConferenceIQ request;
 
         synchronized (syncRoot)
         {
             if (checkIfDisposed("updateBundleTransportInfo"))
+            {
                 return;
+            }
 
             colibriBuilder.reset();
 
             colibriBuilder.addBundleTransportUpdateReq(
-                    transport, localChannelsInfo);
+                    transport, channelBundleId);
 
-            iq = colibriBuilder.getRequest(jitsiVideobridge);
+            request = colibriBuilder.getRequest(jitsiVideobridge);
         }
 
-        if (iq != null)
+        if (request != null)
         {
-            logRequest("Sending bundle transport info update: ", iq);
+            logRequest("Sending bundle transport info update: ", request);
 
-            connection.sendPacket(iq);
+            connection.sendStanza(request);
         }
     }
 
     /**
      * {@inheritDoc}
+     * </t>
+     * Does not block or wait for a response.
      */
     @Override
     public void expireConference()
     {
-        ColibriConferenceIQ iq;
+        ColibriConferenceIQ request;
 
         synchronized (syncRoot)
         {
             if (checkIfDisposed("expireConference"))
+            {
                 return;
+            }
 
             colibriBuilder.reset();
 
@@ -703,13 +791,13 @@ public class ColibriConferenceImpl
             // Expire all channels
             if (colibriBuilder.addExpireChannelsReq(conferenceState))
             {
-                iq = colibriBuilder.getRequest(jitsiVideobridge);
+                request = colibriBuilder.getRequest(jitsiVideobridge);
 
-                if (iq != null)
+                if (request != null)
                 {
-                    logRequest("Expire conference: ", iq);
+                    logRequest("Expire conference: ", request);
 
-                    connection.sendPacket(iq);
+                    connection.sendStanza(request);
                 }
             }
 
@@ -747,7 +835,9 @@ public class ColibriConferenceImpl
                                    boolean mute)
     {
         if (checkIfDisposed("muteParticipant"))
+        {
             return false;
+        }
 
         ColibriConferenceIQ request = new ColibriConferenceIQ();
         request.setID(conferenceState.getID());
@@ -763,41 +853,35 @@ public class ColibriConferenceImpl
             return false;
         }
 
-        ColibriConferenceIQ.Content contentRequest
+        ColibriConferenceIQ.Content requestContent
             = new ColibriConferenceIQ.Content(audioContent.getName());
 
         for (ColibriConferenceIQ.Channel channel : audioContent.getChannels())
         {
-            ColibriConferenceIQ.Channel channelRequest
+            ColibriConferenceIQ.Channel requestChannel
                 = new ColibriConferenceIQ.Channel();
 
-            channelRequest.setID(channel.getID());
+            requestChannel.setID(channel.getID());
 
-            if (mute)
-            {
-                channelRequest.setDirection(MediaDirection.SENDONLY);
-            }
-            else
-            {
-                channelRequest.setDirection(MediaDirection.SENDRECV);
-            }
+            requestChannel.setDirection(
+                    mute ? MediaDirection.SENDONLY : MediaDirection.SENDRECV);
 
-            contentRequest.addChannel(channelRequest);
+            requestContent.addChannel(requestChannel);
         }
 
-        if (contentRequest.getChannelCount() == 0)
+        if (requestContent.getChannelCount() == 0)
         {
             logger.error("Failed to mute - no channels to modify." +
                              " ConfID:" + request.getID());
             return false;
         }
 
-        request.setType(IQ.Type.SET);
+        request.setType(IQ.Type.set);
         request.setTo(jitsiVideobridge);
 
-        request.addContent(contentRequest);
+        request.addContent(requestContent);
 
-        connection.sendPacket(request);
+        connection.sendStanza(request);
 
         // FIXME wait for response and set local status
 
@@ -808,7 +892,7 @@ public class ColibriConferenceImpl
      * Sets world readable name that identifies the conference.
      * @param name the new name.
      */
-    public void setName(String name)
+    public void setName(Localpart name)
     {
         conferenceState.setName(name);
     }
@@ -817,7 +901,7 @@ public class ColibriConferenceImpl
      * Gets world readable name that identifies the conference.
      * @return the name.
      */
-    public String getName()
+    public Localpart getName()
     {
         return conferenceState.getName();
     }
@@ -827,49 +911,65 @@ public class ColibriConferenceImpl
      */
     @Override
     public void updateChannelsInfo(
-            ColibriConferenceIQ                            localChannelsInfo,
-            Map<String, RtpDescriptionPacketExtension>     rtpInfoMap,
-            MediaSSRCMap                                   ssrcs,
-            MediaSSRCGroupMap                              ssrcGroups,
-            IceUdpTransportPacketExtension                 bundleTransport,
-            Map<String, IceUdpTransportPacketExtension>    transportMap)
+            ColibriConferenceIQ localChannelsInfo,
+            Map<String, RtpDescriptionPacketExtension> descriptionMap,
+            MediaSourceMap sources,
+            MediaSourceGroupMap sourceGroups,
+            IceUdpTransportPacketExtension bundleTransport,
+            Map<String, IceUdpTransportPacketExtension> transportMap,
+            String endpointId,
+            List<String> relays)
     {
-        ColibriConferenceIQ iq;
+        ColibriConferenceIQ request;
+        if (localChannelsInfo == null)
+        {
+            logger.error("Can not update channels -- null");
+            return;
+        }
 
         synchronized (syncRoot)
         {
             if (checkIfDisposed("updateChannelsInfo"))
+            {
                 return;
+            }
 
             colibriBuilder.reset();
 
             boolean send = false;
 
             // RTP description
-            if (rtpInfoMap != null
-                    && colibriBuilder.addRtpDescription(
-                            rtpInfoMap, localChannelsInfo))
+            if (descriptionMap != null)
             {
-                send = true;
+                for (String contentName : descriptionMap.keySet())
+                {
+                    ColibriConferenceIQ.Channel channel
+                        = localChannelsInfo.getContent(contentName)
+                            .getChannels().get(0);
+                    send |= colibriBuilder.addRtpDescription(
+                            descriptionMap.get(contentName),
+                            contentName,
+                            channel);
+                }
             }
             // SSRCs
-            if (ssrcs != null
-                    && colibriBuilder.addSSSRCInfo(
-                            ssrcs.toMap(), localChannelsInfo))
+            if (sources != null
+                    && colibriBuilder.addSourceInfo(
+                            sources.toMap(), localChannelsInfo))
             {
                 send = true;
             }
             // SSRC groups
-            if (ssrcGroups != null
-                    && colibriBuilder.addSSSRCGroupsInfo(
-                            ssrcGroups.toMap(), localChannelsInfo))
+            if (sourceGroups != null
+                    && colibriBuilder.addSourceGroupsInfo(
+                            sourceGroups.toMap(), localChannelsInfo))
             {
                 send = true;
             }
             // Bundle transport...
             if (bundleTransport != null
                     && colibriBuilder.addBundleTransportUpdateReq(
-                            bundleTransport, localChannelsInfo))
+                            bundleTransport, endpointId))
             {
                 send = true;
             }
@@ -880,15 +980,20 @@ public class ColibriConferenceImpl
             {
                 send = true;
             }
+            if (relays != null
+                    && colibriBuilder.addOctoRelays(relays, localChannelsInfo))
+            {
+                send = true;
+            }
 
-            iq = send ? colibriBuilder.getRequest(jitsiVideobridge) : null;
+            request = send ? colibriBuilder.getRequest(jitsiVideobridge) : null;
         }
 
-        if (iq != null)
+        if (request != null)
         {
-            logRequest("Sending channel info update: ", iq);
+            logRequest("Sending channel info update: ", request);
 
-            connection.sendPacket(iq);
+            connection.sendStanza(request);
         }
     }
 
@@ -985,24 +1090,29 @@ public class ColibriConferenceImpl
         {
             synchronized (syncRoot)
             {
-                String jvbInUse = jitsiVideobridge;
+                Jid jvbInUse = jitsiVideobridge;
 
                 if (conferenceState.getID() == null && creatorThread == null)
                 {
                     creatorThread = Thread.currentThread();
 
                     if (logger.isDebugEnabled())
+                    {
                         logger.debug("I'm the conference creator - " +
-                                     Thread.currentThread().getName());
+                                         Thread.currentThread().getName());
+                    }
 
                     return true;
                 }
                 else
                 {
                     if (logger.isDebugEnabled())
+                    {
                         logger.debug(
                             "Will have to wait until the conference " +
-                            "is created - " + Thread.currentThread().getName());
+                                "is created - " + Thread.currentThread()
+                                .getName());
+                    }
 
                     while (creatorThread != null)
                     {
@@ -1026,10 +1136,12 @@ public class ColibriConferenceImpl
                     }
 
                     if (logger.isDebugEnabled())
+                    {
                         logger.debug(
                             "Conference created ! Continuing with " +
-                            "channel allocation -" +
-                            Thread.currentThread().getName());
+                                "channel allocation -" +
+                                Thread.currentThread().getName());
+                    }
                 }
             }
             return false;
@@ -1046,9 +1158,11 @@ public class ColibriConferenceImpl
                 if (creatorThread == Thread.currentThread())
                 {
                     if (logger.isDebugEnabled())
+                    {
                         logger.debug(
-                            "Conference creator is releasing " +
-                            "the lock - " + Thread.currentThread().getName());
+                               "Conference creator is releasing the lock - "
+                                    + Thread.currentThread().getName());
+                    }
 
                     creatorThread = null;
                     syncRoot.notifyAll();

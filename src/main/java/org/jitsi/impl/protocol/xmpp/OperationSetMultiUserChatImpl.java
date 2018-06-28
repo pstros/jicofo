@@ -20,6 +20,9 @@ package org.jitsi.impl.protocol.xmpp;
 import net.java.sip.communicator.service.protocol.*;
 
 import org.jivesoftware.smack.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
+import org.jxmpp.stringprep.*;
 
 import java.util.*;
 
@@ -93,7 +96,18 @@ public class OperationSetMultiUserChatImpl
                                    Map<String, Object> roomProperties)
         throws OperationFailedException, OperationNotSupportedException
     {
-        roomName = roomName.toLowerCase();
+        EntityBareJid roomJid;
+        try
+        {
+            roomJid = JidCreate.entityBareFrom(roomName);
+        }
+        catch (XmppStringprepException e)
+        {
+            throw new OperationFailedException(
+                    "Invalid room name",
+                    OperationFailedException.ILLEGAL_ARGUMENT,
+                    e);
+        }
 
         synchronized (rooms)
         {
@@ -104,9 +118,9 @@ public class OperationSetMultiUserChatImpl
                     OperationFailedException.GENERAL_ERROR);
             }
 
-            ChatRoomImpl newRoom = new ChatRoomImpl(this, roomName);
+            ChatRoomImpl newRoom = new ChatRoomImpl(this, roomJid);
 
-            rooms.put(roomName, newRoom);
+            rooms.put(newRoom.getName(), newRoom);
 
             return newRoom;
         }
@@ -164,7 +178,7 @@ public class OperationSetMultiUserChatImpl
     /**
      * Returns Smack connection object used by parent protocol provider service.
      */
-    public Connection getConnection()
+    public XMPPConnection getConnection()
     {
         return protocolProvider.getConnection();
     }

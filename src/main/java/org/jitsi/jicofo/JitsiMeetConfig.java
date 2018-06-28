@@ -17,10 +17,12 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 import net.java.sip.communicator.util.Logger;
 
 import org.jitsi.util.*;
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
+import org.jxmpp.stringprep.*;
 
 import java.util.*;
 
@@ -47,18 +49,35 @@ public class JitsiMeetConfig
      * *NOTE* It is meant to be used for automated testing of
      * the {@link LipSyncHack} only !
      */
-    public static final String AUDIO_PACKET_DELAY = "audioPacketDelay";
+    public static final String PNAME_AUDIO_PACKET_DELAY = "audioPacketDelay";
 
     /**
      * The name of channel last N configuration property. Should be non-negative
      * number. Pass <tt>-1</tt> to disable last N functionality.
      */
-    public static final String CHANNEL_LAST_N_PNAME = "channelLastN";
+    public static final String PNAME_CHANNEL_LAST_N = "channelLastN";
+
+    /**
+     * The name of the "disableRtx" property.
+     */
+    public static final String PNAME_DISABLE_RTX = "disableRtx";
 
     /**
      * The name of the property that enables the {@link LipSyncHack}.
      */
-    public static final String ENABLE_LIPSYNC = "enableLipSync";
+    public static final String PNAME_ENABLE_LIPSYNC = "enableLipSync";
+
+    /**
+     * The name of the property which enables the inclusion of the REMB RTCP
+     * in the offer.
+     */
+    public static final String PNAME_ENABLE_REMB = "enableRemb";
+
+    /**
+     * The name of the property which enables the inclusion of the TCC RTP
+     * header extension in the offer.
+     */
+    public static final String PNAME_ENABLE_TCC = "enableTcc";
 
     /**
      * The name of the property that specifies JID of the bridge which should be
@@ -67,60 +86,76 @@ public class JitsiMeetConfig
      * on specific bridge instance.
      * That property is per conference specific.
      */
-    public static final String ENFORCED_BRIDGE = "enforcedBridge";
+    public static final String PNAME_ENFORCED_BRIDGE = "enforcedBridge";
+
+    /**
+     * The name of the "minBitrate" property.
+     */
+    public static final String PNAME_MIN_BITRATE = "minBitrate";
+
+    /**
+     * The name of the property that determines the min partcipants to start
+     * the call.
+     */
+    public static final String PNAME_MIN_PARTICIPANTS = "minParticipants";
 
     /*
      * The name of the open sctp configuration property. Pass 'true' to
      * enable or 'false' to disable.
      */
-    public static final String OPEN_SCTP_PNAME = "openSctp";
+    public static final String PNAME_OPEN_SCTP = "openSctp";
 
     /**
      * The name of the configuration property used to configure Jigasi(SIP
      * gateway) instance.
      */
-    //public static final String SIP_GATEWAY_PNAME = "call_control";
+    //public static final String PNAME_SIP_GATEWAY = "call_control";
 
     /**
      * The name of the start muted property for audio.
      */
-    public static final String START_AUDIO_MUTED = "startAudioMuted";
+    public static final String PNAME_START_AUDIO_MUTED = "startAudioMuted";
 
     /**
      * The name of the start muted property for video.
      */
-    public static final String START_VIDEO_MUTED = "startVideoMuted";
-
-    /**
-     * The name of the "disableRtx" property.
-     */
-    public static final String DISABLE_RTX_PNAME = "disableRtx";
-
-    /**
-     * The name of the "minBitrate" property.
-     */
-    public static final String MIN_BITRATE_PNAME = "minBitrate";
+    public static final String PNAME_START_VIDEO_MUTED = "startVideoMuted";
 
     /**
      * The name of the "startBitrate" property.
      */
-    public static final String START_BITRATE_PNAME = "startBitrate";
+    public static final String PNAME_START_BITRATE = "startBitrate";
 
     /**
      * The name of the "stereo" property.
      */
-    public static final String STEREO_PNAME = "stereo";
+    public static final String PNAME_STEREO = "stereo";
 
     /**
      * The name of the "useRoomAsSharedDocumentName" config property.
      */
-    public static final String USE_ROOM_AS_SHARED_DOC_NAME
+    public static final String PNAME_USE_ROOM_AS_SHARED_DOC_NAME
             = "useRoomAsSharedDocumentName";
+
+    /**
+     * Disable REMBs by default.
+     */
+    private static final boolean DEFAULT_ENABLE_REMB = false;
+
+    /**
+     * Enable TCC by default.
+     */
+    private static final boolean DEFAULT_ENABLE_TCC = true;
+
+    /**
+     * The default value for the "minParticipants" property.
+     */
+    private static final int DEFAULT_MIN_PARTICIPANTS = 2;
 
     /**
      * The default value of the "startBitrate" property.
      */
-    public static final int START_BITRATE_DEFAULT = 800;
+    public static final int DEFAULT_START_BITRATE = 800;
 
     private final Map<String, String> properties;
 
@@ -140,9 +175,23 @@ public class JitsiMeetConfig
      * <tt>BridgeSelector</tt>. <tt>null</tt> if not specified.
      * That property is per conference specific.
      */
-    public String getEnforcedVideobridge()
+    public Jid getEnforcedVideobridge()
     {
-        return properties.get(ENFORCED_BRIDGE);
+        try
+        {
+            String enforcedBridge = properties.get(PNAME_ENFORCED_BRIDGE);
+            if (StringUtils.isNullOrEmpty(enforcedBridge))
+            {
+                return null;
+            }
+
+            return JidCreate.from(enforcedBridge);
+        }
+        catch (XmppStringprepException e)
+        {
+            logger.error("Invalid JID for enforced videobridge", e);
+            return null;
+        }
     }
 
     /**
@@ -160,7 +209,7 @@ public class JitsiMeetConfig
      */
     public Integer getChannelLastN()
     {
-        return getInt(CHANNEL_LAST_N_PNAME);
+        return getInt(PNAME_CHANNEL_LAST_N);
     }
 
     /**
@@ -169,7 +218,7 @@ public class JitsiMeetConfig
      */
     public Boolean isLipSyncEnabled()
     {
-        return getBoolean(ENABLE_LIPSYNC);
+        return getBoolean(PNAME_ENABLE_LIPSYNC);
     }
 
     /**
@@ -178,7 +227,7 @@ public class JitsiMeetConfig
      */
     public Integer getAudioPacketDelay()
     {
-        return getInt(AUDIO_PACKET_DELAY);
+        return getInt(PNAME_AUDIO_PACKET_DELAY);
     }
 
     /**
@@ -186,9 +235,40 @@ public class JitsiMeetConfig
      */
     public boolean isRtxEnabled()
     {
-        String disableRtxStr = properties.get(DISABLE_RTX_PNAME);
+        String disableRtxStr = properties.get(PNAME_DISABLE_RTX);
         return StringUtils.isNullOrEmpty(disableRtxStr)
             || !Boolean.parseBoolean(disableRtxStr);
+    }
+
+    /**
+     * Gets a boolean that indicates whether or not to enable the REMB RTP
+     * header extension in created offers.
+     */
+    public boolean isRembEnabled()
+    {
+        Boolean enableRemb = getBoolean(PNAME_ENABLE_REMB);
+        return enableRemb == null ? DEFAULT_ENABLE_REMB : enableRemb;
+    }
+
+    /**
+     * Gets a boolean that indicates whether or not to enable the TCC RTP header
+     * extension in created offers.
+     */
+    public boolean isTccEnabled()
+    {
+        Boolean enableTcc = getBoolean(PNAME_ENABLE_TCC);
+        return enableTcc == null ? DEFAULT_ENABLE_TCC : enableTcc;
+    }
+
+    /**
+     * Gets the minimum number of participants that need to be present in the
+     * call before we start it.
+     */
+    public int getMinParticipants()
+    {
+        Integer minParticipants = getInt(PNAME_MIN_PARTICIPANTS);
+        return minParticipants != null
+            ? minParticipants : DEFAULT_MIN_PARTICIPANTS;
     }
 
     /**
@@ -197,7 +277,7 @@ public class JitsiMeetConfig
      */
     public Boolean openSctp()
     {
-        return getBoolean(OPEN_SCTP_PNAME);
+        return getBoolean(PNAME_OPEN_SCTP);
     }
 
     private Boolean getBoolean(String name)
@@ -243,18 +323,18 @@ public class JitsiMeetConfig
      * Returns the value of the start muted audio property.
      * @return the value of the start muted audio property.
      */
-    public Integer getAudioMuted()
+    public Integer getStartAudioMuted()
     {
-        return getInt(START_AUDIO_MUTED);
+        return getInt(PNAME_START_AUDIO_MUTED);
     }
 
     /**
      * Returns the value of the start muted video property.
      * @return the value of the start muted video property.
      */
-    public Integer getVideoMuted()
+    public Integer getStartVideoMuted()
     {
-        return getInt(START_VIDEO_MUTED);
+        return getInt(PNAME_START_VIDEO_MUTED);
     }
 
     /**
@@ -262,7 +342,7 @@ public class JitsiMeetConfig
      */
     public int getMinBitrate()
     {
-        Integer minBitrate = getInt(MIN_BITRATE_PNAME);
+        Integer minBitrate = getInt(PNAME_MIN_BITRATE);
         return minBitrate == null ? -1 : minBitrate;
     }
 
@@ -271,8 +351,8 @@ public class JitsiMeetConfig
      */
     public int getStartBitrate()
     {
-        Integer startBitrate = getInt(START_BITRATE_PNAME);
-        return startBitrate == null ? START_BITRATE_DEFAULT : startBitrate;
+        Integer startBitrate = getInt(PNAME_START_BITRATE);
+        return startBitrate == null ? DEFAULT_START_BITRATE : startBitrate;
     }
 
     /**
@@ -280,7 +360,7 @@ public class JitsiMeetConfig
      */
     public boolean stereoEnabled()
     {
-        Boolean stereo = getBoolean(STEREO_PNAME);
+        Boolean stereo = getBoolean(PNAME_STEREO);
         return stereo != null && stereo;
     }
 
@@ -291,7 +371,7 @@ public class JitsiMeetConfig
      */
     public boolean useRoomAsSharedDocName()
     {
-        Boolean useRoom = getBoolean(USE_ROOM_AS_SHARED_DOC_NAME);
+        Boolean useRoom = getBoolean(PNAME_USE_ROOM_AS_SHARED_DOC_NAME);
         return (useRoom != null) && useRoom;
     }
 }

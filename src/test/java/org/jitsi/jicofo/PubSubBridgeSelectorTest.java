@@ -26,8 +26,11 @@ import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 import net.java.sip.communicator.util.*;
 
 import org.jitsi.eventadmin.*;
+import org.jitsi.jicofo.discovery.*;
 import org.jitsi.jicofo.event.*;
-import org.jitsi.jicofo.util.DaemonThreadFactory;
+import org.jitsi.jicofo.util.*;
+import org.jitsi.protocol.xmpp.*;
+import org.jitsi.util.*;
 import org.jitsi.videobridge.stats.*;
 
 import org.jivesoftware.smack.packet.*;
@@ -36,6 +39,8 @@ import org.junit.*;
 import org.junit.runner.*;
 import org.junit.runners.*;
 
+import org.jxmpp.jid.*;
+import org.jxmpp.jid.impl.*;
 import org.mockito.*;
 
 import java.util.*;
@@ -54,9 +59,9 @@ public class PubSubBridgeSelectorTest
 {
     static OSGiHandler osgi = OSGiHandler.getInstance();
 
-    private static String jvb1Jid = "jvb1.test.domain.net";
-    private static String jvb2Jid = "jvb2.test.domain.net";
-    private static String jvb3Jid = "jvb3.test.domain.net";
+    private static Jid jvb1Jid;
+    private static Jid jvb2Jid;
+    private static Jid jvb3Jid;
 
     private static String sharedPubSubNode = "sharedJvbStats";
 
@@ -76,7 +81,7 @@ public class PubSubBridgeSelectorTest
 
     private static MockSetSimpleCapsOpSet capsOpSet;
 
-    private static MockXmppConnection xmppConnection;
+    private static XmppConnection xmppConnection;
 
     private static MockVideobridge jvb1;
 
@@ -113,7 +118,7 @@ public class PubSubBridgeSelectorTest
         mockProvider
             = (MockProtocolProvider) providerListener.obtainProvider(1000);
 
-        xmppConnection = mockProvider.getMockXmppConnection();
+        xmppConnection = mockProvider.getXmppConnection();
 
         selector = meetServices.getBridgeSelector();
 
@@ -135,30 +140,38 @@ public class PubSubBridgeSelectorTest
     public static void tearDownClass()
         throws Exception
     {
-        jvb1.stop(osgi.bc);
-
-        jvb2.stop(osgi.bc);
-
-        jvb3.stop(osgi.bc);
-
-        osgi.shutdown();
+        try
+        {
+            jvb1.stop(osgi.bc);
+            jvb2.stop(osgi.bc);
+            jvb3.stop(osgi.bc);
+        }
+        catch(NullPointerException npe)
+        {
+            // ignore
+        }
+        finally
+        {
+            osgi.shutdown();
+        }
     }
 
     static private void createMockJvbs()
         throws Exception
     {
-        jvb1 = createMockJvb(jvb1Jid);
-
-        jvb2 = createMockJvb(jvb2Jid);
-
-        jvb3 = createMockJvb(jvb3Jid);
+        jvb1Jid = JidCreate.from("jvb1.test.domain.net");
+        jvb2Jid = JidCreate.from("jvb2.test.domain.net");
+        jvb3Jid = JidCreate.from("jvb3.test.domain.net");
+        jvb1 = createMockJvb(JidCreate.from(jvb1Jid));
+        jvb2 = createMockJvb(JidCreate.from(jvb2Jid));
+        jvb3 = createMockJvb(JidCreate.from(jvb3Jid));
     }
 
-    static private MockVideobridge createMockJvb(String   jvbJid)
+    static private MockVideobridge createMockJvb(Jid jvbJid)
         throws Exception
     {
         MockVideobridge mockBridge
-            = new MockVideobridge(xmppConnection, jvbJid);
+            = new MockVideobridge(new MockXmppConnection(jvbJid), jvbJid);
 
         MockCapsNode jvbNode
             = new MockCapsNode(
@@ -199,19 +212,22 @@ public class PubSubBridgeSelectorTest
 
     /**
      * If the bridge is restarted and we have health check failed on it, but
-     * before {@link ComponentsDiscovery#ThroughPubSubDiscovery} has timed out
+     * before {@link ComponentsDiscovery.ThroughPubSubDiscovery} has timed out
      * this instance we will not re-discover it through the PubSub.
      */
     // FIXME randomly fails
     //@Test
-    public void clearPubSubBridgeStateIssueTest()
+    public void clearPubSubBridgeIssueTest()
     {
-        System.err.println("Running clearPubSubBridgeStateIssueTest");
+        System.err.println("Running clearPubSubBridgeIssueTest");
 
         // Make sure that jvb advertises features with health-check support
-        MockCapsNode jvbNode
-            = new MockCapsNode(
-                    jvb1Jid, JitsiMeetServices.VIDEOBRIDGE_FEATURES2);
+        String[] features
+            = ArrayUtils.add(
+                    JitsiMeetServices.VIDEOBRIDGE_FEATURES,
+                    String.class,
+                    DiscoveryUtil.FEATURE_HEALTH_CHECK);
+        MockCapsNode jvbNode = new MockCapsNode(jvb1Jid, features);
         capsOpSet.addChildNode(jvbNode);
 
         // Remove all JVBS
@@ -341,7 +357,7 @@ public class PubSubBridgeSelectorTest
         }
     }
 
-    private PacketExtension triggerJvbStats(String itemId, int conferenceCount)
+    private ExtensionElement triggerJvbStats(Jid itemId, int conferenceCount)
     {
         ColibriStatsExtension statsExtension = new ColibriStatsExtension();
 
@@ -350,7 +366,7 @@ public class PubSubBridgeSelectorTest
                 VideobridgeStatistics.CONFERENCES, "" + conferenceCount));
 
         subOpSet.fireSubscriptionNotification(
-            sharedPubSubNode, itemId, statsExtension);
+            sharedPubSubNode, itemId.toString(), statsExtension);
 
         return statsExtension;
     }
