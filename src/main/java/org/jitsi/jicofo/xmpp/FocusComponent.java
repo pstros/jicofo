@@ -286,23 +286,25 @@ public class FocusComponent extends ComponentBase implements BundleActivator {
         String identity = null;
 
         // Authentication
-        if (authAuthority != null) {
-            org.jivesoftware.smack.packet.IQ authErrorOrResponse = authAuthority.processAuthentication(query, response);
+        // if (authAuthority != null) {
+        // org.jivesoftware.smack.packet.IQ authErrorOrResponse =
+        // authAuthority.processAuthentication(query, response);
 
-            // Checks if authentication module wants to cancel further
-            // processing and eventually returns it's response
-            if (authErrorOrResponse != null) {
-                return authErrorOrResponse;
-            }
-            // Only authenticated users are allowed to create new rooms
-            if (!roomExists) {
-                identity = authAuthority.getUserIdentity(peerJid);
-                if (identity == null) {
-                    // Error not authorized
-                    return ErrorFactory.createNotAuthorizedError(query, "not authorized user domain");
-                }
-            }
-        }
+        // // Checks if authentication module wants to cancel further
+        // // processing and eventually returns it's response
+        // if (authErrorOrResponse != null) {
+        // return authErrorOrResponse;
+        // }
+        // // Only authenticated users are allowed to create new rooms
+        // if (!roomExists) {
+        // identity = authAuthority.getUserIdentity(peerJid);
+        // if (identity == null) {
+        // // Error not authorized
+        // return ErrorFactory.createNotAuthorizedError(query, "not authorized user
+        // domain");
+        // }
+        // }
+        // }
 
         // Check room reservation?
         if (!roomExists && reservationSystem != null) {
@@ -338,6 +340,7 @@ public class FocusComponent extends ComponentBase implements BundleActivator {
         // Authentication and reservations system logic
         org.jivesoftware.smack.packet.IQ error = processExtensions(query, response, roomExists);
         if (error != null) {
+            logger.info("JM error process Extentsions " + error.toXML());
             return error;
         }
 
