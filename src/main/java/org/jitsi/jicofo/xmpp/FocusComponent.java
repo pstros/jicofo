@@ -330,9 +330,11 @@ public class FocusComponent extends ComponentBase implements BundleActivator {
 
         if (focusManager.isShutdownInProgress() && !roomExists) {
             // Service unavailable
+            logger.info("JM POOOP i shouldnt be here");
             return ColibriConferenceIQ.createGracefulShutdownErrorResponse(query);
         }
 
+        logger.info("JM do process Extentsions " + roomExists);
         // Authentication and reservations system logic
         org.jivesoftware.smack.packet.IQ error = processExtensions(query, response, roomExists);
         if (error != null) {
@@ -341,6 +343,8 @@ public class FocusComponent extends ComponentBase implements BundleActivator {
 
         logger.info("FocusManager - conferenceRequest: " + room);
         boolean ready = focusManager.conferenceRequest(room, query.getPropertiesMap());
+
+        logger.info("JM - FocusManager - conferenceRequest done " + room);
 
         if (!isFocusAnonymous && authAuthority == null) {
             // Focus is authenticated system admin, so we let them in
@@ -369,6 +373,8 @@ public class FocusComponent extends ComponentBase implements BundleActivator {
                 || focusManager.getJitsiMeetServices().getJigasiDetector() != null) {
             response.addProperty(new ConferenceIq.Property("sipGatewayEnabled", "true"));
         }
+
+        logger.info("JM - returning response");
 
         return response;
     }

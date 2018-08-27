@@ -468,6 +468,7 @@ public class FocusManager implements JitsiMeetConferenceImpl.ConferenceListener,
      *         {@code null} if no conference has been allocated yet
      */
     public JitsiMeetConferenceImpl getConference(EntityBareJid roomName) {
+        logger.info("JM - waiting for lock (getConference): " + roomName);
         synchronized (conferencesSyncRoot) {
             return conferences.get(roomName);
         }
