@@ -286,25 +286,27 @@ public class FocusComponent extends ComponentBase implements BundleActivator {
         String identity = null;
 
         // Authentication
-        // if (authAuthority != null) {
-        // org.jivesoftware.smack.packet.IQ authErrorOrResponse =
-        // authAuthority.processAuthentication(query, response);
+        // JM this is the problem.
+        if (authAuthority != null) {
+            logger.info("JM AA.processAuthentication()");
+            org.jivesoftware.smack.packet.IQ authErrorOrResponse = authAuthority.processAuthentication(query, response);
 
-        // // Checks if authentication module wants to cancel further
-        // // processing and eventually returns it's response
-        // if (authErrorOrResponse != null) {
-        // return authErrorOrResponse;
-        // }
-        // // Only authenticated users are allowed to create new rooms
-        // if (!roomExists) {
-        // identity = authAuthority.getUserIdentity(peerJid);
-        // if (identity == null) {
-        // // Error not authorized
-        // return ErrorFactory.createNotAuthorizedError(query, "not authorized user
-        // domain");
-        // }
-        // }
-        // }
+            // Checks if authentication module wants to cancel further
+            // processing and eventually returns it's response
+            if (authErrorOrResponse != null) {
+                return authErrorOrResponse;
+            }
+            // Only authenticated users are allowed to create new rooms
+            if (!roomExists) {
+                logger.info("JM AA.getUserIdentity()");
+                identity = authAuthority.getUserIdentity(peerJid);
+                if (identity == null) {
+                    // Error not authorized
+                    return ErrorFactory.createNotAuthorizedError(query, "not authorized user domain");
+                }
+            }
+            logger.info("JM AA passed everything");
+        }
 
         // Check room reservation?
         if (!roomExists && reservationSystem != null) {
