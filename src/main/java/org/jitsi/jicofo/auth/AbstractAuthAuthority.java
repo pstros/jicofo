@@ -343,9 +343,9 @@ public abstract class AbstractAuthAuthority implements AuthenticationAuthority, 
     @Override
     public IQ processAuthentication(ConferenceIq query, ConferenceIq response) {
         logger.info("JM - processAuthenication waiting for lock");
-        synchronized (syncRoot) {
-            return processAuthLocked(query, response);
-        }
+        // synchronized (syncRoot) {
+        return processAuthLocked(query, response);
+        // }
     }
 
     /**
