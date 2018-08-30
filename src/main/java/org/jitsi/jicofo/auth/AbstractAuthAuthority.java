@@ -297,8 +297,13 @@ public abstract class AbstractAuthAuthority
     @Override
     public String getSessionForJid(Jid jabberId)
     {
-        AuthenticationSession session = findSessionForJabberId(jabberId);
-        return session != null ? session.getSessionId() : null;
+
+        synchronized (syncRoot)
+        {
+           AuthenticationSession session = findSessionForJabberId(jabberId);
+           return session != null ? session.getSessionId() : null;
+        }
+
     }
 
     /**
