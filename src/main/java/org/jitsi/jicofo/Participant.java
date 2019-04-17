@@ -58,6 +58,14 @@ public class Participant
     }
 
     /**
+     * The {@code BridgeSession} of which this {@code Participant} is part of.
+     *
+     * Whenever this value is set to a non-null value it means that Jicofo
+     * has assigned a bridge to this instance.
+     */
+    private JitsiMeetConferenceImpl.BridgeSession bridgeSession;
+
+    /**
      * MUC chat member of this participant.
      */
     private final XmppChatMember roomMember;
@@ -131,6 +139,25 @@ public class Participant
     public JingleSession getJingleSession()
     {
         return jingleSession;
+    }
+
+    /**
+     * Sets the current {@code BridgeSession}.
+     *
+     * @param bridgeSession the new bridge session to set.
+     * @see #bridgeSession
+     */
+    void setBridgeSession(JitsiMeetConferenceImpl.BridgeSession bridgeSession)
+    {
+        if (this.bridgeSession != null)
+        {
+            logger.error(String.format(
+                    "Overwriting bridge session in %s new: %s old: %s",
+                    this,
+                    bridgeSession,
+                    this.bridgeSession));
+        }
+        this.bridgeSession = bridgeSession;
     }
 
     /**
@@ -386,6 +413,15 @@ public class Participant
     }
 
     /**
+     * Returns the {@link org.jitsi.jicofo.JitsiMeetConferenceImpl.BridgeSession}
+     * or <tt>null</tt>.
+     */
+    public JitsiMeetConferenceImpl.BridgeSession getBridgeSession()
+    {
+        return bridgeSession;
+    }
+
+    /**
      * Returns the endpoint ID for this participant in the videobridge(Colibri)
      * context.
      */
@@ -454,10 +490,48 @@ public class Participant
         return jingleSession != null;
     }
 
+    /**
+     * Terminates the current {@code BridgeSession}, terminates the channel
+     * allocator and resets any fields related to the session.
+     *
+     * @param syncExpire whether or not the expire Colibri channels operation
+     * should be performed in a synchronous manner.
+     *
+     * @return {@code BridgeSession} from which this {@code Participant} has
+     * been removed or {@code null} if this {@link Participant} was not part
+     * of any bridge session.
+     * @see ColibriConference#expireChannels(ColibriConferenceIQ, boolean)
+     */
+    @Deprecated
+    JitsiMeetConferenceImpl.BridgeSession terminateBridgeSession(
+            boolean syncExpire)
+    {
+        JitsiMeetConferenceImpl.BridgeSession _session = this.bridgeSession;
+
+        if (_session != null)
+        {
+            this.setChannelAllocator(null);
+            _session.terminate(this, syncExpire);
+            this.clearTransportInfo();
+            this.setColibriChannelsInfo(null);
+            this.bridgeSession = null;
+        }
+
+        return _session;
+    }
+
+    /**
+     * See {@link #terminateBridgeSession(boolean)}.
+     */
+    JitsiMeetConferenceImpl.BridgeSession terminateBridgeSession()
+    {
+        return terminateBridgeSession(false);
+    }
+
     @Override
     public String toString()
     {
-        return "[Participant endpointId=" + getEndpointId();
+        return "Participant[endpointId=" + getEndpointId() + "]";
     }
 
 }

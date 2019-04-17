@@ -126,6 +126,7 @@ public class JibriRecorder
         boolean emptyStreamId = StringUtils.isNullOrEmpty(streamID);
         String youTubeBroadcastId = iq.getYoutubeBroadcastId();
         String displayName = iq.getDisplayName();
+        String applicationData = iq.getAppData();
 
         if ((!emptyStreamId
                 && (recordingMode.equals(RecordingMode.STREAM))
@@ -138,10 +139,11 @@ public class JibriRecorder
                     this,
                     conference.getRoomName(),
                     globalConfig.getJibriPendingTimeout(),
+                    globalConfig.getNumJibriRetries(),
                     connection,
                     scheduledExecutor,
                     jibriDetector,
-                    false, null, displayName, streamID, youTubeBroadcastId, sessionId,
+                    false, null, displayName, streamID, youTubeBroadcastId, sessionId, applicationData,
                     classLogger);
             if (jibriSession.start())
             {

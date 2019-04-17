@@ -132,12 +132,13 @@ public class JibriSipGateway
                         this,
                         conference.getRoomName(),
                         globalConfig.getJibriPendingTimeout(),
+                        globalConfig.getNumJibriRetries(),
                         connection,
                         scheduledExecutor,
                         jibriDetector,
                         false,
                         sipAddress,
-                        displayName, null, null, sessionId,
+                        displayName, null, null, sessionId, null,
                         classLogger);
             sipSessions.put(sipAddress, jibriSession);
             // Try starting Jibri

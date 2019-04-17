@@ -62,10 +62,24 @@ public class XmppProtocolActivator
         new ColibriIQProvider();
         // HealthChecks
         HealthCheckIQProvider.registerIQProvider();
+        // ice-state
+        ProviderManager.addExtensionProvider(
+                IceStatePacketExtension.ELEMENT_NAME,
+                IceStatePacketExtension.NAMESPACE,
+                new DefaultPacketExtensionProvider<>(
+                        IceStatePacketExtension.class));
+        // bridge-session
+        ProviderManager.addExtensionProvider(
+                BridgeSessionPacketExtension.ELEMENT_NAME,
+                BridgeSessionPacketExtension.NAMESPACE,
+                new DefaultPacketExtensionProvider<>(
+                        BridgeSessionPacketExtension.class));
         // Jibri IQs
         ProviderManager.addIQProvider(
                 JibriIq.ELEMENT_NAME, JibriIq.NAMESPACE, new JibriIqProvider());
         JibriStatusPacketExt.registerExtensionProvider();
+        JibriBusyStatusPacketExt.registerExtensionProvider();
+        HealthStatusPacketExt.registerExtensionProvider();
         // User info
         ProviderManager.addExtensionProvider(
                 UserInfoPacketExt.ELEMENT_NAME,
@@ -86,6 +100,22 @@ public class XmppProtocolActivator
                 StatsId.ELEMENT_NAME,
                 StatsId.NAMESPACE,
                 new StatsId.Provider());
+
+        //Add the extensions used for handling the inviting of transcriber
+        ProviderManager.addExtensionProvider(
+            TranscriptionRequestExtension.ELEMENT_NAME,
+            TranscriptionRequestExtension.NAMESPACE,
+            new DefaultPacketExtensionProvider<>(
+                TranscriptionRequestExtension.class
+            )
+        );
+        ProviderManager.addExtensionProvider(
+            TranscriptionStatusExtension.ELEMENT_NAME,
+            TranscriptionStatusExtension.NAMESPACE,
+            new DefaultPacketExtensionProvider<>(
+                TranscriptionStatusExtension.class
+            )
+        );
 
         // Override original Smack Version IQ class
         ProviderManager.addIQProvider(

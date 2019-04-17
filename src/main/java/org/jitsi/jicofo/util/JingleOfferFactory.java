@@ -95,6 +95,19 @@ public class JingleOfferFactory
     public static final String ENABLE_TOF_PNAME = "org.jitsi.jicofo.ENABLE_TOF";
 
     /**
+     * The name of the property which enables the inclusion of the video content
+     * type RTP header extension.
+     */
+    public static final String ENABLE_VIDEO_CONTENT_TYPE_PNAME
+        = "org.jitsi.jicofo.ENABLE_VIDEO_CONTENT_TYPE";
+
+    /**
+     * The name of the property which enables the inclusion of the RID RTP
+     * header extension.
+     */
+    public static final String ENABLE_RID_PNAME = "org.jitsi.jicofo.ENABLE_RID";
+
+    /**
      * The VP8 payload type to include in the Jingle session-invite.
      */
     private final int VP8_PT;
@@ -141,6 +154,17 @@ public class JingleOfferFactory
     private final boolean enableTof;
 
     /**
+     * Whether to enable the video content type header extension in created
+     * offers.
+     */
+    private final boolean enableVideoContentType;
+
+    /**
+     * Whether to enable the RID header extension in created offers.
+     */
+    private final boolean enableRid;
+
+    /**
      * Ctor.
      *
      * @param cfg the {@link ConfigurationService} to pull config options from.
@@ -162,6 +186,11 @@ public class JingleOfferFactory
         // (and currently clients seem to not use it when abs-send-time is
         // available).
         enableTof = cfg != null && cfg.getBoolean(ENABLE_TOF_PNAME, false);
+
+        enableVideoContentType = cfg != null
+            && cfg.getBoolean(ENABLE_VIDEO_CONTENT_TYPE_PNAME, false);
+
+        enableRid = cfg != null && cfg.getBoolean(ENABLE_RID_PNAME, false);
     }
 
     /**
@@ -335,10 +364,23 @@ public class JingleOfferFactory
             rtpDesc.addExtmap(framemarking);
         }
 
-        RTPHdrExtPacketExtension rtpStreamId = new RTPHdrExtPacketExtension();
-        rtpStreamId.setID("4");
-        rtpStreamId.setURI(URI.create(RTPExtension.RTP_STREAM_ID_URN));
-        rtpDesc.addExtmap(rtpStreamId);
+        if (enableVideoContentType)
+        {
+            // http://www.webrtc.org/experiments/rtp-hdrext/video-content-type
+            RTPHdrExtPacketExtension videoContentType
+                = new RTPHdrExtPacketExtension();
+            videoContentType.setID("7");
+            videoContentType.setURI(URI.create(RTPExtension.VIDEO_CONTENT_TYPE_URN));
+            rtpDesc.addExtmap(videoContentType);
+        }
+
+        if (enableRid)
+        {
+            RTPHdrExtPacketExtension rtpStreamId = new RTPHdrExtPacketExtension();
+            rtpStreamId.setID("4");
+            rtpStreamId.setURI(URI.create(RTPExtension.RTP_STREAM_ID_URN));
+            rtpDesc.addExtmap(rtpStreamId);
+        }
 
         // a=rtpmap:100 VP8/90000
         PayloadTypePacketExtension vp8
@@ -381,7 +423,6 @@ public class JingleOfferFactory
         // a=rtcp-fb:107 nack pli
         h264.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", "pli"));
 
-
         if (minBitrate != -1)
         {
             addParameterExtension(
@@ -393,6 +434,11 @@ public class JingleOfferFactory
             addParameterExtension(
                 h264, "x-google-start-bitrate", String.valueOf(startBitrate));
         }
+
+        addParameterExtension(
+            h264,
+            "profile-level-id",
+            "42e01f;level-asymmetry-allowed=1;packetization-mode=1;");
 
         // a=rtpmap:101 VP9/90000
         PayloadTypePacketExtension vp9

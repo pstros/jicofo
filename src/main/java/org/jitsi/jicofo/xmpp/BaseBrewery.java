@@ -50,10 +50,9 @@ public abstract class BaseBrewery<T extends ExtensionElement>
     private static final Logger logger = Logger.getLogger(BaseBrewery.class);
 
     /**
-     * The name fo XMPP MUC room where all service instances gather to brew
-     * together.
+     * The MUC JID of the room which this detector will join.
      */
-    private final String breweryName;
+    private final String breweryJid;
 
     /**
      * The <tt>ProtocolProviderHandler</tt> for Jicofo's XMPP connection.
@@ -81,27 +80,32 @@ public abstract class BaseBrewery<T extends ExtensionElement>
     private final String extensionNamespace;
 
     /**
+     * Whether to use the MUC occupant jid of detected instances, or the
+     * user jid (the "real" jid).
+     */
+    private boolean useOccupantJid = true;
+
+    /**
      * Creates new instance of <tt>BaseBrewery</tt>
-     * @param protocolProvider the instance fo <tt>ProtocolProviderHandler</tt>
-     * for Jicofo's XMPP connection.
-     * @param breweryName the name of the brewery MUC room where all
-     * brewing instance will gather. Can be just roomName or the full room id:
-     * roomName@muc-servicename.jabserver.com. In case of just room name a
-     * the muc service will be discovered from server and in case of multiple
-     * will use the first one.
+     * @param protocolProvider the {@link ProtocolProviderHandler} instance
+     * to which this detector will attach.
+     * @param breweryJid the MUC JID of the room which this detector will join,
+     * e.g. {@code roomName@muc-servicename.jabserver.com}.
      * @param presenceExtensionElementName the element name of the extension
+     * which this brewery will look for.
      * @param presenceExtensionNamespace the namespace of the extension
+     * which this brewery will look for.
      */
     public BaseBrewery(ProtocolProviderHandler protocolProvider,
-        String breweryName,
+        String breweryJid,
         String presenceExtensionElementName,
         String presenceExtensionNamespace)
     {
         this.protocolProvider
             = Objects.requireNonNull(protocolProvider, "protocolProvider");
-        Assert.notNullNorEmpty(breweryName, "breweryName");
+        Assert.notNullNorEmpty(breweryJid, "breweryJid");
 
-        this.breweryName = breweryName;
+        this.breweryJid = breweryJid;
         this.extensionElementName = presenceExtensionElementName;
         this.extensionNamespace = presenceExtensionNamespace;
     }
@@ -180,16 +184,16 @@ public abstract class BaseBrewery<T extends ExtensionElement>
 
             Objects.requireNonNull(muc, "OperationSetMultiUserChat");
 
-            chatRoom = muc.createChatRoom(breweryName, null);
+            chatRoom = muc.createChatRoom(breweryJid, null);
             chatRoom.addMemberPresenceListener(this);
             chatRoom.addMemberPropertyChangeListener(this);
             chatRoom.join();
 
-            logger.info("Joined brewery room: " + breweryName);
+            logger.info("Joined brewery room: " + breweryJid);
         }
         catch (OperationFailedException | OperationNotSupportedException e)
         {
-            logger.error("Failed to create room: " + breweryName, e);
+            logger.error("Failed to create room: " + breweryJid, e);
         }
     }
 
@@ -205,7 +209,7 @@ public abstract class BaseBrewery<T extends ExtensionElement>
             chatRoom.leave();
             chatRoom = null;
 
-            logger.info("Left brewery room: " + breweryName);
+            logger.info("Left brewery room: " + breweryJid);
         }
 
         // Clean up the list of service instances
@@ -233,7 +237,7 @@ public abstract class BaseBrewery<T extends ExtensionElement>
             || ChatRoomMemberPresenceChangeEvent.MEMBER_QUIT.equals(eventType))
         {
             // Process offline status
-            BrewInstance instance = find(chatMember.getOccupantJid());
+            BrewInstance instance = find(getJid(chatMember));
 
             if (instance != null)
             {
@@ -278,7 +282,25 @@ public abstract class BaseBrewery<T extends ExtensionElement>
             return;
         }
 
-        processInstanceStatusChanged(member.getOccupantJid(), (T) ext);
+        processInstanceStatusChanged(getJid(member), (T) ext);
+    }
+
+    /**
+     * Gets the JID from an {@link XmppChatMember}, which is to be used for
+     * a {@link BrewInstance}. Which JID to use (real vs occupant) depends on
+     * this instance's configuration.
+     *
+     * @param member the member for which to get the JID.
+     * @return the JID of {@code member} to use for {@link BrewInstance}s.
+     */
+    private Jid getJid(XmppChatMember member)
+    {
+        if (member == null)
+        {
+            return null;
+        }
+
+        return useOccupantJid ? member.getOccupantJid() : member.getJid();
     }
 
     /**
@@ -290,7 +312,7 @@ public abstract class BaseBrewery<T extends ExtensionElement>
      * instance status.
      */
     private void processInstanceStatusChanged(
-        EntityFullJid jid, T extension)
+        Jid jid, T extension)
     {
         BrewInstance instance = find(jid);
 
@@ -317,7 +339,7 @@ public abstract class BaseBrewery<T extends ExtensionElement>
      * @param status the updated status for that instance
      */
     abstract protected void onInstanceStatusChanged(
-        EntityFullJid jid, T status);
+        Jid jid, T status);
 
     /**
      * Finds instance by muc address.
@@ -325,7 +347,7 @@ public abstract class BaseBrewery<T extends ExtensionElement>
      * @param jid the address to use while searching for muc instance.
      * @return the brewing instance or null if not found.
      */
-    private BrewInstance find(EntityFullJid jid)
+    private BrewInstance find(Jid jid)
     {
         return instances.stream()
             .filter(i -> i.jid.equals(jid))
@@ -349,10 +371,19 @@ public abstract class BaseBrewery<T extends ExtensionElement>
     }
 
     /**
+     * Sets the flag the the use of the MUC occupant jid or the user jid.
+     * @param useOccupantJid the value to set.
+     */
+    protected void setUseOccupantJid(boolean useOccupantJid)
+    {
+        this.useOccupantJid = useOccupantJid;
+    }
+
+    /**
      * Notifies that a brewing instance is going offline.
      * @param jid the instance muc address
      */
-    abstract protected void notifyInstanceOffline(EntityFullJid jid);
+    abstract protected void notifyInstanceOffline(Jid jid);
 
     /**
      * Internal structure for storing information about brewing instances.
@@ -362,14 +393,14 @@ public abstract class BaseBrewery<T extends ExtensionElement>
         /**
          * Eg. "room@muc.server.net/nick"
          */
-        public final EntityFullJid jid;
+        public final Jid jid;
 
         /**
          * One of {@link ExtensionElement}
          */
         public T status;
 
-        BrewInstance(EntityFullJid jid, T status)
+        BrewInstance(Jid jid, T status)
         {
             this.jid = jid;
             this.status = status;

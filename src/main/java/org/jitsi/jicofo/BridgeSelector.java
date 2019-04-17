@@ -35,6 +35,7 @@ import org.jxmpp.stringprep.*;
 import org.osgi.framework.*;
 
 import java.util.*;
+import java.util.stream.*;
 
 /**
  * Class exposes methods for selecting best videobridge from all currently
@@ -90,33 +91,6 @@ public class BridgeSelector
      * Five minutes.
      */
     public static final long DEFAULT_FAILURE_RESET_THRESHOLD = 5L * 60L * 1000L;
-
-    /**
-     * Tries to parse an object as an integer, return null on failure.
-     * @param obj the object to parse.
-     */
-    private static Integer getInt(Object obj)
-    {
-        if (obj == null)
-        {
-            return null;
-        }
-        if (obj instanceof Integer)
-        {
-            return (Integer) obj;
-        }
-
-        String str = obj.toString();
-        try
-        {
-            return Integer.valueOf(str);
-        }
-        catch (NumberFormatException e)
-        {
-            logger.error("Error parsing an int: " + obj);
-        }
-        return null;
-    }
 
     /**
      * Stores reference to <tt>EventHandler</tt> registration, so that it can be
@@ -310,13 +284,23 @@ public class BridgeSelector
      *
      * @return the selected bridge, represented by its {@link Bridge}.
      * @param conference the conference for which a bridge is to be selected.
-     * @param participant the participant for which a bridge is to be selected.
+     * @param participantRegion the region of the participant for which a
+     * bridge is to be selected.
      */
     synchronized public Bridge selectBridge(
-            JitsiMeetConference conference, Participant participant)
+            JitsiMeetConference conference,
+            String participantRegion,
+            boolean allowMultiBridge)
     {
-        List<Bridge> bridges = getPrioritizedBridgesList();
-        return bridgeSelectionStrategy.select(bridges, conference, participant);
+        List<Bridge> bridges
+            = getPrioritizedBridgesList().stream()
+                .filter(Bridge::isOperational)
+                .collect(Collectors.toList());
+        return bridgeSelectionStrategy.select(
+            bridges,
+            conference,
+            participantRegion,
+            allowMultiBridge);
     }
 
     /**
@@ -328,7 +312,7 @@ public class BridgeSelector
     public Bridge selectBridge(
             JitsiMeetConference conference)
     {
-        return selectBridge(conference, null);
+        return selectBridge(conference, null, false);
     }
 
     /**
@@ -465,57 +449,7 @@ public class BridgeSelector
             }
         }
 
-        ColibriStatsExtension stats = (ColibriStatsExtension) payload;
-        for (ExtensionElement child : stats.getChildExtensions())
-        {
-            if (!(child instanceof ColibriStatsExtension.Stat))
-            {
-                continue;
-            }
-
-            ColibriStatsExtension.Stat stat
-                = (ColibriStatsExtension.Stat) child;
-            if ("conferences".equals(stat.getName()))
-            {
-                Integer conferenceCount = getInt(stat.getValue());
-                if (conferenceCount != null)
-                {
-                    bridge.setConferenceCount(conferenceCount);
-                }
-            }
-            else if ("videochannels".equals(stat.getName()))
-            {
-                Integer videoChannelCount = getInt(stat.getValue());
-                if (videoChannelCount != null)
-                {
-                    bridge.setVideoChannelCount(videoChannelCount);
-                }
-            }
-            else if ("videostreams".equals(stat.getName()))
-            {
-                Integer videoStreamCount = getInt(stat.getValue());
-                if (videoStreamCount != null)
-                {
-                    bridge.setVideoStreamCount(videoStreamCount);
-                }
-            }
-            else if ("relay_id".equals(stat.getName()))
-            {
-                Object relayId = stat.getValue();
-                if (relayId != null)
-                {
-                    bridge.setRelayId(relayId.toString());
-                }
-            }
-            else if ("region".equals(stat.getName()))
-            {
-                Object region = stat.getValue();
-                if (region != null)
-                {
-                    bridge.setRegion(region.toString());
-                }
-            }
-        }
+        bridge.setStats((ColibriStatsExtension) payload);
     }
 
     /**
@@ -744,15 +678,16 @@ public class BridgeSelector
          * @param bridges the list of bridges to select from.
          * @param conference the conference for which a bridge is to be
          * selected.
-         * @param participant the participant for which a bridge is to be
-         * selected.
+         * @param participantRegion the region of the participant for which
+         * a bridge is to be selected.
          * @return the selected bridge, or {@code null} if no bridge is
          * available.
          */
         private Bridge select(
                 List<Bridge> bridges,
                 JitsiMeetConference conference,
-                Participant participant)
+                String participantRegion,
+                boolean allowMultiBridge)
         {
             List<Bridge> conferenceBridges
                 = conference == null
@@ -760,7 +695,8 @@ public class BridgeSelector
                         : conference.getBridges();
             if (conferenceBridges.isEmpty())
             {
-                Bridge bridge = selectInitial(bridges, conference, participant);
+                Bridge bridge
+                    = selectInitial(bridges, conference, participantRegion);
                 if (logger.isDebugEnabled())
                 {
                     logger.debug(
@@ -771,7 +707,8 @@ public class BridgeSelector
             }
             else
             {
-                if (conferenceBridges.get(0).getRelayId() == null)
+                if (!allowMultiBridge
+                    || conferenceBridges.get(0).getRelayId() == null)
                 {
                     if (logger.isDebugEnabled())
                     {
@@ -785,7 +722,7 @@ public class BridgeSelector
 
                 return doSelect(
                         bridges, conferenceBridges,
-                        conference, participant);
+                        conference, participantRegion);
             }
         }
 
@@ -798,20 +735,16 @@ public class BridgeSelector
          * @param bridges the list of bridges to select from.
          * @param conference the conference for which a bridge is to be
          * selected.
-         * @param participant the participant for which a bridge is to be
-         * selected.
+         * @param participantRegion the region of the participant for which a
+         * bridge is to be selected.
          * @return the selected bridge, or {@code null} if no bridge is
          * available.
          */
         private Bridge selectInitial(List<Bridge> bridges,
                                      JitsiMeetConference conference,
-                                     Participant participant)
+                                     String participantRegion)
         {
             // Prefer a bridge in the participant's region.
-            String participantRegion
-                = participant != null
-                    ? participant.getChatMember().getRegion()
-                    : null;
             if (participantRegion != null)
             {
                 for (Bridge bridge : bridges)
@@ -844,8 +777,8 @@ public class BridgeSelector
          * conference.
          * @param conference the conference for which a bridge is to be
          * selected.
-         * @param participant the participant for which a bridge is to be
-         * selected.
+         * @param participantRegion the region of the participant for which a
+         * bridge is to be selected.
          * @return the selected bridge, or {@code null} if no bridge is
          * available.
          */
@@ -853,7 +786,7 @@ public class BridgeSelector
                 List<Bridge> bridges,
                 List<Bridge> conferenceBridges,
                 JitsiMeetConference conference,
-                Participant participant);
+                String participantRegion);
     }
 
     /**
@@ -879,7 +812,7 @@ public class BridgeSelector
                 List<Bridge> bridges,
                 List<Bridge> conferenceBridges,
                 JitsiMeetConference conference,
-                Participant participant)
+                String participantRegion)
         {
             if (conferenceBridges.size() != 1)
             {
@@ -927,7 +860,7 @@ public class BridgeSelector
             List<Bridge> bridges,
             List<Bridge> conferenceBridges,
             JitsiMeetConference conference,
-            Participant participant)
+            String participantRegion)
         {
             for (Bridge bridge : bridges)
             {
@@ -952,6 +885,85 @@ public class BridgeSelector
             }
 
             return null;
+        }
+    }
+
+    /**
+     * Implements a {@link BridgeSelectionStrategy} which
+     */
+    private static class RegionBasedBridgeSelectionStrategy
+        extends BridgeSelectionStrategy
+    {
+        /**
+         * Default constructor.
+         */
+        RegionBasedBridgeSelectionStrategy()
+        {}
+
+        /**
+         * {@inheritDoc}
+         * </p>
+         * Always selects the bridge already used by the conference.
+         */
+        @Override
+        public Bridge doSelect(
+            List<Bridge> bridges,
+            List<Bridge> conferenceBridges,
+            JitsiMeetConference conference,
+            String participantRegion)
+        {
+            if (participantRegion == null)
+            {
+                // We don't know the participant's region. Use the least loaded
+                // existing bridge in the conference.
+                return selectFirst(bridges, conferenceBridges);
+            }
+
+            // We know the participant's region.
+            List<Bridge> conferenceBridgesInRegion
+                = conferenceBridges.stream()
+                    .filter(
+                        bridge -> participantRegion.equals(bridge.getRegion()))
+                    .collect(Collectors.toList());
+            if (!conferenceBridgesInRegion.isEmpty())
+            {
+                return selectFirst(bridges, conferenceBridgesInRegion);
+            }
+
+            // The conference has no bridges in the participant region. Try
+            // to add a new bridge in that region.
+            Bridge bridgeInRegion
+                = bridges.stream()
+                    .filter(bridge -> participantRegion.equals(bridge.getRegion()))
+                    .findFirst().orElse(null);
+            if (bridgeInRegion != null)
+            {
+                return bridgeInRegion;
+            }
+
+            // We couldn't find a bridge in the participant's region. Use the
+            // least loaded of the existing conference bridges.
+            // TODO: perhaps use a bridge in a nearby region (if we have data
+            // about the topology of the regions).
+            return selectFirst(bridges, conferenceBridges);
+        }
+
+        /**
+         * Selects the bridge from {@code selectFrom} which occurs first in
+         * {@code order}.
+         * @param order A list which dictates the order.
+         * @param selectFrom A list of bridges to select from. Assumed non-null
+         * and non-empty.
+         * @return the bridge from {@code selectFrom} which occurs first in
+         * {@code order}.
+         */
+        private Bridge selectFirst(
+            List<Bridge> selectFrom, List<Bridge> order)
+        {
+            return order.stream()
+                .filter(selectFrom::contains)
+                .findFirst()
+                .orElse(selectFrom.get(0));
         }
     }
 }

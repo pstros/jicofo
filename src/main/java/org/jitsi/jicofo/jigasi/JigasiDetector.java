@@ -22,6 +22,8 @@ import org.jitsi.jicofo.*;
 import org.jitsi.jicofo.xmpp.*;
 import org.jxmpp.jid.*;
 
+import java.util.*;
+
 /**
  * <tt>JigasiDetector</tt> manages the pool of Jigasi instances which exist in
  * the current session. Does that by joining "brewery" room where Jigasi connect
@@ -40,6 +42,25 @@ public class JigasiDetector
      */
     public static final String JIGASI_ROOM_PNAME
         = "org.jitsi.jicofo.jigasi.BREWERY";
+
+    /**
+     * The name of the stat used by the instance to indicate the number of
+     * participants. This should match
+     * {@code VideobridgeStatistics.NUMBEROFPARTICIPANTS}, but is defined
+     * separately to avoid depending on the {@code jitsi-videobridge}
+     * maven package.
+     */
+    private static final String STAT_NAME_PARTICIPANTS = "participants";
+
+    /**
+     * The name of the stat that indicates the instance has entered graceful
+     * shutdown mode.
+     * {@code VideobridgeStatistics.SHUTDOWN_IN_PROGRESS}, but is defined
+     * separately to avoid depending on the {@code jitsi-videobridge} maven
+     * package.
+     */
+    public static final String STAT_NAME_SHUTDOWN_IN_PROGRESS
+        = "graceful_shutdown";
 
     /**
      * Constructs new JigasiDetector.
@@ -62,12 +83,12 @@ public class JigasiDetector
 
     @Override
     protected void onInstanceStatusChanged(
-        EntityFullJid jid,
+        Jid jid,
         ColibriStatsExtension status)
     {}
 
     @Override
-    protected void notifyInstanceOffline(EntityFullJid jid)
+    protected void notifyInstanceOffline(Jid jid)
     {}
 
     /**
@@ -78,13 +99,40 @@ public class JigasiDetector
      */
     public Jid selectJigasi()
     {
+        return this.selectJigasi(null);
+    }
+
+    /**
+     * Selects the jigasi instance that is less loaded.
+     *
+     * @param filter a list of <tt>Jid</tt>s to be filtered from the list of
+     * available Jigasi instances. List that we do not want as a result.
+     * @return XMPP address of Jigasi instance or <tt>null</tt> if there are
+     * no Jigasis available currently.
+     */
+    public Jid selectJigasi(List<Jid> filter)
+    {
         BrewInstance lessLoadedInstance = null;
         int numberOfParticipants = Integer.MAX_VALUE;
         for (BrewInstance jigasi : instances)
         {
+            // filter instances
+            if (filter != null && filter.contains(jigasi.jid))
+            {
+                continue;
+            }
+
+            if(jigasi.status != null
+                && Boolean.valueOf(jigasi.status.getValueAsString(
+                    STAT_NAME_SHUTDOWN_IN_PROGRESS)))
+            {
+                // skip instance which is shutting down
+                continue;
+            }
+
             int currentParticipants
                 = jigasi.status != null ?
-                    jigasi.status.getAttributeAsInt("participants")
+                    jigasi.status.getValueAsInt(STAT_NAME_PARTICIPANTS)
                     : 0;
             if (currentParticipants < numberOfParticipants)
             {
