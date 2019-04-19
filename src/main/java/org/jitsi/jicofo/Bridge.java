@@ -17,8 +17,10 @@
  */
 package org.jitsi.jicofo;
 
+import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
 import org.jitsi.jicofo.discovery.*;
 import org.jitsi.jicofo.event.*;
+import org.jitsi.jicofo.jigasi.*;
 import org.jitsi.util.*;
 import org.jxmpp.jid.*;
 
@@ -36,7 +38,40 @@ import java.util.*;
 class Bridge
     implements Comparable<Bridge>
 {
-    private final static Logger logger = Logger.getLogger(Bridge.class);
+    /**
+     * The {@link Logger} used by the {@link Bridge} class and its instances.
+     */
+    private static final Logger logger = Logger.getLogger(Bridge.class);
+
+    /**
+     * The name of the stat used by jitsi-videobridge to indicate the number of
+     * video streams. This should match
+     * {@code VideobridgeStatistics.VIDEOSTREAMS}, but is defined separately
+     * to avoid depending on the {@code jitsi-videobridge} maven package.
+     */
+    private static final String STAT_NAME_VIDEO_STREAMS = "videostreams";
+
+    /**
+     * The name of the stat used by jitsi-videobridge to indicate its region.
+     * This should match {@code VideobridgeStatistics.REGION}, but is defined
+     * separately to avoid depending on the {@code jitsi-videobridge} maven
+     * package.
+     */
+    private static final String STAT_NAME_REGION = "region";
+
+    /**
+     * The name of the stat used by jitsi-videobridge to indicate its Octo relay
+     * ID. This should match {@code VideobridgeStatistics.RELAY_ID}, but is
+     * defined separately to avoid depending on the {@code jitsi-videobridge}
+     * maven package.
+     */
+    private static final String STAT_NAME_RELAY_ID = "relay_id";
+
+    /**
+     * A {@link ColibriStatsExtension} instance with no stats.
+     */
+    private static final ColibriStatsExtension EMPTY_STATS
+        = new ColibriStatsExtension();
 
     /**
      * The parent {@link BridgeSelector}.
@@ -49,34 +84,10 @@ class Bridge
     private final Jid jid;
 
     /**
-     * How many conferences are there on the bridge (as reported by the bridge
-     * itself).
-     */
-    private int conferenceCount = 0;
-
-    /**
-     * How many video channels are there on the bridge (as reported by the
-     * bridge itself).
-     */
-    private int videoChannelCount = 0;
-
-    /**
      * How many video streams are there on the bridge (as reported by the bridge
      * itself).
      */
     private int videoStreamCount = 0;
-
-    /**
-     * The relay ID advertised by the bridge, or {@code null} if none was
-     * advertised.
-     */
-    private String relayId = null;
-
-    /**
-     * The region advertised by the bridge, or {@code null} if none was
-     * advertised.
-     */
-    private String region = null;
 
     /**
      * Accumulates video stream count changes coming from
@@ -112,6 +123,41 @@ class Bridge
      */
     private volatile long failureTimestamp;
 
+    /**
+     * The last known {@link ColibriStatsExtension} reported by this bridge.
+     */
+    private ColibriStatsExtension stats = EMPTY_STATS;
+
+    /**
+     * Notifies this instance that a new {@link ColibriStatsExtension} was
+     * received for this instance.
+     * @param stats the {@link ColibriStatsExtension} instance which was
+     * received.
+     */
+    void setStats(ColibriStatsExtension stats)
+    {
+        if (stats == null)
+        {
+            this.stats = EMPTY_STATS;
+        }
+        else
+        {
+            this.stats = ColibriStatsExtension.clone(stats);
+        }
+        stats = this.stats;
+
+        Integer videoStreamCount = stats.getValueAsInt(STAT_NAME_VIDEO_STREAMS);
+        if (videoStreamCount != null)
+        {
+            // We have extra logic for keeping track of the number of video
+            // streams.
+            setVideoStreamCount(videoStreamCount);
+        }
+
+        setIsOperational(!Boolean.valueOf(stats.getValueAsString(
+            JigasiDetector.STAT_NAME_SHUTDOWN_IN_PROGRESS)));
+    }
+
     Bridge(BridgeSelector bridgeSelector,
            Jid jid,
            Version version)
@@ -121,63 +167,13 @@ class Bridge
         this.version = version;
     }
 
-    public void setConferenceCount(int conferenceCount)
-    {
-        if (this.conferenceCount != conferenceCount)
-        {
-            logger.info("Conference count for: " + jid + ": " + conferenceCount);
-        }
-        this.conferenceCount = conferenceCount;
-    }
-
-    public int getConferenceCount()
-    {
-        return this.conferenceCount;
-    }
-
-    /**
-     * Return the number of channels used.
-     * @return the number of channels used.
-     */
-    public int getVideoChannelCount()
-    {
-        return videoChannelCount;
-    }
-
     /**
      * @return the relay ID advertised by the bridge, or {@code null} if
      * none was advertised.
      */
     public String getRelayId()
     {
-        return relayId;
-    }
-
-    /**
-     * Sets the number of channels used.
-     * @param channelCount the number of channels used.
-     */
-    public void setVideoChannelCount(int channelCount)
-    {
-        this.videoChannelCount = channelCount;
-    }
-
-    /**
-     * Sets the relay ID advertised by the bridge.
-     * @param relayId the value to set.
-     */
-    public void setRelayId(String relayId)
-    {
-        this.relayId = relayId;
-    }
-
-    /**
-     * Returns the number of streams used.
-     * @return the number of streams used.
-     */
-    public int getVideoStreamCount()
-    {
-        return videoStreamCount;
+        return stats.getValueAsString(STAT_NAME_RELAY_ID);
     }
 
     /**
@@ -205,7 +201,6 @@ class Bridge
             videoStreamCountDiff = 0;
             logger.info(
                 "Reset video stream diff on " + this.jid
-                    + " video channels: " + this.videoChannelCount
                     + " video streams: " + this.videoStreamCount
                     + " (estimation error: "
                     // FIXME estimation error is often invalid wrong,
@@ -296,7 +291,6 @@ class Bridge
         logger.info(
             (adding ? "Adding " : "Removing ") + Math.abs(videoStreamCount)
                 + " video streams on " + this.jid
-                + " video channels: " + this.videoChannelCount
                 + " video streams: " + this.videoStreamCount
                 + " diff: " + videoStreamCountDiff
                 + " (estimated: " + getEstimatedVideoStreamCount() + ")");
@@ -317,16 +311,7 @@ class Bridge
      */
     public String getRegion()
     {
-        return region;
-    }
-
-    /**
-     * Sets the region (e.g. "us-east") of this {@link Bridge}.
-     * @param region the value to set.
-     */
-    public void setRegion(String region)
-    {
-        this.region = region;
+        return stats.getValueAsString(STAT_NAME_REGION);
     }
 
     /**
@@ -335,7 +320,10 @@ class Bridge
     @Override
     public String toString()
     {
-        return "[Bridge, jid=" + jid.toString() +
-            ", relayId=" + getRelayId() + ", region=" + getRegion() + "]";
+        return String.format(
+                "Bridge[jid=%s, relayId=%s, region=%s]",
+                     jid.toString(),
+                     getRelayId(),
+                     getRegion());
     }
 }

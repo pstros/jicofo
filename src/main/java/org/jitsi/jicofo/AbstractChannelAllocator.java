@@ -122,8 +122,9 @@ public abstract class AbstractChannelAllocator implements Runnable
             boolean reInvite)
     {
         this.meetConference = meetConference;
-        this.bridgeSession = bridgeSession;
-        this.participant = participant;
+        this.bridgeSession
+            = Objects.requireNonNull(bridgeSession, "bridgeSession");
+        this.participant = Objects.requireNonNull(participant, "participant");
         this.startMuted = startMuted;
         this.reInvite = reInvite;
         this.logger = Logger.getLogger(classLogger, meetConference.getLogger());
@@ -172,9 +173,6 @@ public abstract class AbstractChannelAllocator implements Runnable
         if (colibriChannels == null)
         {
             logger.error("Channel allocator failed: " + participant);
-
-            // Notify conference about failure
-            meetConference.onChannelAllocationFailed(this, !isReInvite());
 
             // Cancel this task - nothing to be done after failure
             cancel();
@@ -294,12 +292,12 @@ public abstract class AbstractChannelAllocator implements Runnable
                 if (!StringUtils.isNullOrEmpty(
                     bridgeSession.colibriConference.getConferenceId()))
                 {
+                    // Cancel this instance
+                    cancel();
+
                     // Notify the conference that this ColibriConference is now
                     // broken.
                     meetConference.onBridgeDown(jvb);
-
-                    // This thread will end after returning null here
-                    cancel();
                     return null;
                 }
             }
@@ -373,5 +371,16 @@ public abstract class AbstractChannelAllocator implements Runnable
     public boolean isReInvite()
     {
         return reInvite;
+    }
+
+    @Override
+    public String toString()
+    {
+        return String.format(
+                "%s[%s, %s]@%d",
+                this.getClass().getSimpleName(),
+                bridgeSession,
+                participant,
+                hashCode());
     }
 }

@@ -20,6 +20,7 @@ package org.jitsi.jicofo.recording.jibri;
 import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.*;
 import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.JibriIq.*;
 import net.java.sip.communicator.service.protocol.*;
+import org.jetbrains.annotations.*;
 import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.osgi.*;
@@ -63,7 +64,7 @@ public class JibriSession
      * The JID of the Jibri currently being used by this session or
      * <tt>null</tt> otherwise.
      */
-    private EntityFullJid currentJibriJid;
+    private Jid currentJibriJid;
 
     /**
      * The display name Jibri attribute received from Jitsi Meet to be passed
@@ -150,9 +151,24 @@ public class JibriSession
     private final String youTubeBroadcastId;
 
     /**
+     * A JSON-encoded string containing arbitrary application data for Jibri
+     */
+    private final String applicationData;
+
+    /**
      * {@link XmppConnection} instance used to send/listen for XMPP packets.
      */
     private final XmppConnection xmpp;
+
+    /**
+     * The maximum amount of retries we'll attempt
+     */
+    private final int maxNumRetries;
+
+    /**
+     * How many times we've retried this request to another Jibri
+     */
+    private int numRetries = 0;
 
     /**
      * Creates new {@link JibriSession} instance.
@@ -174,6 +190,8 @@ public class JibriSession
      * entering the conference once the session starts.
      * @param streamID a live streaming ID if it's not a SIP session
      * @param youTubeBroadcastId the YouTube broadcast id (optional)
+     * @param applicationData a JSON-encoded string containing application-specific
+     * data for Jibri
      * @param logLevelDelegate logging level delegate which will be used to
      * select logging level for this instance {@link #logger}.
      */
@@ -181,6 +199,7 @@ public class JibriSession
             JibriSession.Owner owner,
             EntityBareJid roomName,
             long pendingTimeout,
+            int maxNumRetries,
             XmppConnection connection,
             ScheduledExecutorService scheduledExecutor,
             JibriDetector jibriDetector,
@@ -190,6 +209,7 @@ public class JibriSession
             String streamID,
             String youTubeBroadcastId,
             String sessionId,
+            String applicationData,
             Logger logLevelDelegate)
     {
         this.owner = owner;
@@ -197,6 +217,7 @@ public class JibriSession
         this.scheduledExecutor
             = Objects.requireNonNull(scheduledExecutor, "scheduledExecutor");
         this.pendingTimeout = pendingTimeout;
+        this.maxNumRetries = maxNumRetries;
         this.isSIP = isSIP;
         this.jibriDetector = jibriDetector;
         this.sipAddress = sipAddress;
@@ -204,6 +225,7 @@ public class JibriSession
         this.streamID = streamID;
         this.youTubeBroadcastId = youTubeBroadcastId;
         this.sessionId = sessionId;
+        this.applicationData = applicationData;
         this.xmpp = connection;
         logger = Logger.getLogger(classLogger, logLevelDelegate);
     }
@@ -215,13 +237,14 @@ public class JibriSession
      */
     synchronized public boolean start()
     {
-        final EntityFullJid jibriJid = jibriDetector.selectJibri();
+        final Jid jibriJid = jibriDetector.selectJibri();
         if (jibriJid != null)
         {
             try
             {
                 jibriEventHandler.start(FocusBundleActivator.bundleContext);
                 sendJibriStartIq(jibriJid);
+                logger.info("Starting session with Jibri " + jibriJid);
                 return true;
             }
             catch (Exception e)
@@ -263,8 +286,7 @@ public class JibriSession
                     stopRequest,
                     stanza -> {
                         JibriIq resp = (JibriIq)stanza;
-                        setJibriStatus(resp.getStatus(), null);
-                        cleanupSession();
+                        handleJibriStatusUpdate(resp.getFrom(), resp.getStatus(), resp.getFailureReason());
                     },
                     exception -> {
                         logger.error("Error sending stop iq: " + exception.toString());
@@ -280,6 +302,7 @@ public class JibriSession
     {
         logger.info("Cleaning up current JibriSession");
         currentJibriJid = null;
+        numRetries = 0;
         try
         {
             jibriEventHandler.stop(FocusBundleActivator.bundleContext);
@@ -320,11 +343,7 @@ public class JibriSession
                 "Updating status from JIBRI: "
                     + iq.toXML() + " for " + roomName);
 
-            setJibriStatus(status, iq.getFailureReason());
-            if (JibriIq.Status.OFF.equals(status))
-            {
-                cleanupSession();
-            }
+            handleJibriStatusUpdate(iq.getFrom(), status, iq.getFailureReason());
         }
         else
         {
@@ -357,7 +376,7 @@ public class JibriSession
      * Sends an IQ to the given Jibri instance and asks it to start
      * recording/SIP call.
      */
-    private void sendJibriStartIq(final EntityFullJid jibriJid)
+    private void sendJibriStartIq(final Jid jibriJid)
     {
         // Store Jibri JID to make the packet filter accept the response
         currentJibriJid = jibriJid;
@@ -374,6 +393,8 @@ public class JibriSession
         startIq.setType(IQ.Type.set);
         startIq.setAction(JibriIq.Action.START);
         startIq.setSessionId(this.sessionId);
+        logger.debug("Passing on jibri application data: " + this.applicationData);
+        startIq.setAppData(this.applicationData);
         if (streamID != null)
         {
             startIq.setStreamId(streamID);
@@ -400,7 +421,7 @@ public class JibriSession
         try
         {
             JibriIq result = (JibriIq)xmpp.sendPacketAndGetReply(startIq);
-            setJibriStatus(result.getStatus(), null);
+            handleJibriStatusUpdate(result.getFrom(), result.getStatus(), result.getFailureReason());
         }
         catch (OperationFailedException e)
         {
@@ -432,24 +453,104 @@ public class JibriSession
     }
 
     /**
-     * Stores current Jibri status and notifies {@link #owner}.
-     * @param newStatus the new Jibri status to be set
-     * @param failureReason optional error for failed state.
+     * Check whether or not we should retry the current request to another Jibri
+     * @return true if we should retry again, false otherwise
      */
-    private void setJibriStatus(JibriIq.Status newStatus, JibriIq.FailureReason failureReason)
+    private boolean shouldRetryRequest()
     {
-        logger.info("Setting jibri status to " + newStatus + " with failure reason " + failureReason);
-        jibriStatus = newStatus;
+        return (maxNumRetries < 0 || numRetries < maxNumRetries);
+    }
 
-        // Clear "pending" status timeout if we enter state other than "pending"
-        if (pendingTimeoutTask != null
-            && !JibriIq.Status.PENDING.equals(newStatus))
+    /**
+     * Retry the current request with another Jibri (if one is available)
+     * @return true if we were able to find another Jibri to retry the request with,
+     * false otherwise
+     */
+    private boolean retryRequestWithAnotherJibri()
+    {
+        numRetries++;
+        return start();
+    }
+
+    /**
+     * Handle a Jibri status update (this could come from an IQ response, a new IQ from Jibri, an XMPP event, etc.).
+     * This will handle:
+     * 1) Retrying with a new Jibri in case of an error
+     * 2) Cleaning up the session when the Jibri session finished successfully (or there was an error but we
+     * have no more Jibris left to try)
+     * @param jibriJid the jid of the jibri for which this status update applies
+     * @param newStatus the jibri's new status
+     * @param failureReason the jibri's failure reason, if any (otherwise null)
+     */
+    private void handleJibriStatusUpdate(
+            @NotNull Jid jibriJid,
+            JibriIq.Status newStatus,
+            @Nullable JibriIq.FailureReason failureReason)
+    {
+        jibriStatus = newStatus;
+        logger.info("Got Jibri status update: Jibri " + jibriJid + " has status " + newStatus +
+                " and failure reason " + failureReason + ", current Jibri jid is " + currentJibriJid);
+        if (currentJibriJid == null)
         {
+            logger.info("Current session has already been cleaned up, ignoring");
+            return;
+        }
+        if (jibriJid.compareTo(currentJibriJid) != 0)
+        {
+            logger.info("This status update is from " + jibriJid +
+                    " but the current Jibri is " + currentJibriJid + ", ignoring");
+            return;
+        }
+        // First: if we're no longer pending (regardless of the Jibri's new state), make sure we stop
+        // the pending timeout task
+        if (pendingTimeoutTask != null && !Status.PENDING.equals(newStatus))
+        {
+            logger.info("Jibri is no longer pending, cancelling pending timeout task");
             pendingTimeoutTask.cancel(false);
             pendingTimeoutTask = null;
         }
-
-        owner.onSessionStateChanged(this, newStatus, failureReason);
+        // Now, if there was a failure of any kind we'll try and find another Jibri to keep things going
+        if (failureReason != null)
+        {
+            // There was an error with the current Jibri, see if we should retry
+            if (shouldRetryRequest())
+            {
+                logger.info("Jibri failed, trying to fall back to another Jibri");
+                if (retryRequestWithAnotherJibri())
+                {
+                    // The fallback to another Jibri succeeded.
+                    logger.info("Successfully resumed session with another Jibri");
+                }
+                else
+                {
+                    logger.info("Failed to fall back to another Jibri, this session has now failed");
+                    // Propagate up that the session has failed entirely.  We'll pass the original failure reason.
+                    owner.onSessionStateChanged(this, newStatus, failureReason);
+                    cleanupSession();
+                }
+            }
+            else
+            {
+                // The Jibri we tried failed and we've reached the maxmium amount of retries we've been
+                // configured to attempt, so we'll give up trying to handle this request.
+                logger.info("Jibri failed, but max amount of retries (" + maxNumRetries + ") reached, giving up");
+                owner.onSessionStateChanged(this, newStatus, failureReason);
+                cleanupSession();
+            }
+        }
+        else if (Status.OFF.equals(newStatus))
+        {
+            logger.info("Jibri session ended cleanly, notifying owner and cleaning up session");
+            // The Jibri stopped for some non-error reason
+            owner.onSessionStateChanged(this, newStatus, failureReason);
+            cleanupSession();
+        }
+        else if (Status.ON.equals(newStatus))
+        {
+            logger.info("Jibri session started, notifying owner");
+            // The Jibri stopped for some non-error reason
+            owner.onSessionStateChanged(this, newStatus, failureReason);
+        }
     }
 
     /**
@@ -509,7 +610,7 @@ public class JibriSession
                     logger.error(
                         nickname() + " went offline: " + jibriJid
                             + " for room: " + roomName);
-                    setJibriStatus(JibriIq.Status.OFF, JibriIq.FailureReason.ERROR);
+                    handleJibriStatusUpdate(jibriJid, Status.OFF, FailureReason.ERROR);
                 }
             }
         }
@@ -535,7 +636,12 @@ public class JibriSession
                 {
                     logger.error(
                         nickname() + " pending timeout! " + roomName);
+                    // If a Jibri times out during the pending phase, it's likely hung or having
+                    // some issue.  We'll send a stop (so if/when it does 'recover', it knows to
+                    // stop) and simulate an error status (like we do in JibriEventHandler#handleEvent
+                    // when a Jibri goes offline) to trigger the fallback logic.
                     stop();
+                    handleJibriStatusUpdate(currentJibriJid, Status.OFF, FailureReason.ERROR);
                 }
             }
         }

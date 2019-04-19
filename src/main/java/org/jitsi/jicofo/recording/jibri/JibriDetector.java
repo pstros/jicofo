@@ -72,7 +72,7 @@ public class JibriDetector
      * Indicates whether this instance detects SIP gateway Jibris or regular
      * live streaming Jibris.
      */
-    private final boolean isSIP;
+    private final boolean isSip;
 
     /**
      * Creates new instance of <tt>JibriDetector</tt>
@@ -80,12 +80,12 @@ public class JibriDetector
      *        for Jicofo's XMPP connection.
      * @param jibriBreweryName the name of the Jibri brewery MUC room where all
      *        Jibris will gather.
-     * @param isSIP <tt>true</tt> if this instance will work with SIP gateway
+     * @param isSip <tt>true</tt> if this instance will work with SIP gateway
      *        Jibris or <tt>false</tt> for live streaming Jibris
      */
     public JibriDetector(ProtocolProviderHandler protocolProvider,
                          String jibriBreweryName,
-                         boolean isSIP)
+                         boolean isSip)
     {
         super(
             protocolProvider,
@@ -96,12 +96,21 @@ public class JibriDetector
         this.eventAdminRef
             = new OSGIServiceRef<>(
                     FocusBundleActivator.bundleContext, EventAdmin.class);
-        this.isSIP = isSIP;
+        this.isSip = isSip;
+    }
+
+    /**
+     * Checks whether this instance detects Jibri instances running in SIP
+     * Gateway mode, or live-streaming mode.
+     */
+    public boolean isSip()
+    {
+        return isSip;
     }
 
     private String getLogName()
     {
-        return isSIP ? "SIP Jibri" : "Jibri";
+        return isSip ? "SIP Jibri" : "Jibri";
     }
 
     /**
@@ -110,12 +119,10 @@ public class JibriDetector
      * @return XMPP address of idle Jibri instance or <tt>null</tt> if there are
      * no Jibris available currently.
      */
-    public EntityFullJid selectJibri()
+    public Jid selectJibri()
     {
         return instances.stream()
-            .filter(
-                jibri -> JibriStatusPacketExt.Status.IDLE.equals(
-                    jibri.status.getStatus()))
+            .filter(jibri -> jibri.status.isAvailable())
             .map(jibri -> jibri.jid)
             .findFirst()
             .orElse(null);
@@ -123,33 +130,30 @@ public class JibriDetector
 
     @Override
     protected void onInstanceStatusChanged(
-        EntityFullJid jid,
+        Jid jid,
         JibriStatusPacketExt presenceExt)
     {
-        logger.info("Received Jibri status " + presenceExt.toXML());
+        logger.info("Received Jibri " + jid + " status " + presenceExt.toXML());
 
-        JibriStatusPacketExt.Status status = presenceExt.getStatus();
-
-        if (JibriStatusPacketExt.Status.UNDEFINED.equals(status))
-        {
-            notifyInstanceOffline(jid);
-        }
-        else if (JibriStatusPacketExt.Status.IDLE.equals(status))
+        if (presenceExt.isAvailable())
         {
             notifyJibriStatus(jid, true);
         }
-        else if (JibriStatusPacketExt.Status.BUSY.equals(status))
-        {
-            notifyJibriStatus(jid, false);
-        }
         else
         {
-            logger.error("Unknown Jibri status: " + status + " for " + jid);
+            if (presenceExt.getBusyStatus() == null || presenceExt.getHealthStatus() == null)
+            {
+                notifyInstanceOffline(jid);
+            }
+            else
+            {
+                notifyJibriStatus(jid, false);
+            }
         }
     }
 
     @Override
-    protected void notifyInstanceOffline(EntityFullJid jid)
+    protected void notifyInstanceOffline(Jid jid)
     {
         logger.info(getLogName() + ": " + jid + " went offline");
 
@@ -157,7 +161,7 @@ public class JibriDetector
         if (eventAdmin != null)
         {
             eventAdmin.postEvent(
-                    JibriEvent.newWentOfflineEvent(jid, this.isSIP));
+                    JibriEvent.newWentOfflineEvent(jid, this.isSip));
         }
         else
         {
@@ -165,7 +169,7 @@ public class JibriDetector
         }
     }
 
-    private void notifyJibriStatus(EntityFullJid jibriJid, boolean available)
+    private void notifyJibriStatus(Jid jibriJid, boolean available)
     {
         logger.info(
             getLogName() + ": " + jibriJid + " available: " + available);
@@ -175,7 +179,7 @@ public class JibriDetector
         {
             eventAdmin.postEvent(
                     JibriEvent.newStatusChangedEvent(
-                            jibriJid, available, isSIP));
+                        jibriJid, available, isSip));
         }
         else
         {
