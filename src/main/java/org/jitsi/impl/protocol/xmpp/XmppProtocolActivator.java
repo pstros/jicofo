@@ -17,14 +17,12 @@
  */
 package org.jitsi.impl.protocol.xmpp;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.health.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jitsimeet.*;
+import org.jitsi.xmpp.extensions.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.health.*;
+import org.jitsi.xmpp.extensions.jibri.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import net.java.sip.communicator.service.protocol.*;
-
-import org.jitsi.impl.protocol.xmpp.extensions.*;
 
 import org.jitsi.jicofo.discovery.*;
 import org.jitsi.jicofo.discovery.Version;
@@ -62,6 +60,18 @@ public class XmppProtocolActivator
         new ColibriIQProvider();
         // HealthChecks
         HealthCheckIQProvider.registerIQProvider();
+        // ice-state
+        ProviderManager.addExtensionProvider(
+                IceStatePacketExtension.ELEMENT_NAME,
+                IceStatePacketExtension.NAMESPACE,
+                new DefaultPacketExtensionProvider<>(
+                        IceStatePacketExtension.class));
+        // bridge-session
+        ProviderManager.addExtensionProvider(
+                BridgeSessionPacketExtension.ELEMENT_NAME,
+                BridgeSessionPacketExtension.NAMESPACE,
+                new DefaultPacketExtensionProvider<>(
+                        BridgeSessionPacketExtension.class));
         // Jibri IQs
         ProviderManager.addIQProvider(
                 JibriIq.ELEMENT_NAME, JibriIq.NAMESPACE, new JibriIqProvider());

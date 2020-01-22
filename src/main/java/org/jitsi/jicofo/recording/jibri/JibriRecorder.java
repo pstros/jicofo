@@ -17,11 +17,12 @@
  */
 package org.jitsi.jicofo.recording.jibri;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.JibriIq.*;
+import org.jitsi.xmpp.extensions.jibri.*;
+import org.jitsi.xmpp.extensions.jibri.JibriIq.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.*;
+import org.jitsi.utils.logging.*;
 import org.jivesoftware.smack.packet.*;
 
 import java.util.concurrent.*;
@@ -83,7 +84,7 @@ public class JibriRecorder
     {
         if (this.jibriSession != null)
         {
-            this.jibriSession.stop();
+            this.jibriSession.stop(null);
             this.jibriSession = null;
         }
 
@@ -138,6 +139,7 @@ public class JibriRecorder
                 = new JibriSession(
                     this,
                     conference.getRoomName(),
+                    iq.getFrom(),
                     globalConfig.getJibriPendingTimeout(),
                     globalConfig.getNumJibriRetries(),
                     connection,
@@ -155,13 +157,17 @@ public class JibriRecorder
                 ErrorIQ errorIq;
                 if (jibriDetector.isAnyInstanceConnected())
                 {
-                    logger.info("Failed to start a Jibri session, all Jibris were busy");
-                    errorIq = IQ.createErrorResponse(iq, XMPPError.Condition.resource_constraint);
+                    logger.info("Failed to start a Jibri session, " +
+                        "all Jibris were busy");
+                    errorIq = IQ.createErrorResponse(
+                        iq, XMPPError.Condition.resource_constraint);
                 }
                 else
                 {
-                    logger.info("Failed to start a Jibri session, no Jibris available");
-                    errorIq = IQ.createErrorResponse(iq, XMPPError.Condition.service_unavailable);
+                    logger.info("Failed to start a Jibri session, " +
+                        "no Jibris available");
+                    errorIq = IQ.createErrorResponse(
+                        iq, XMPPError.Condition.service_unavailable);
                 }
                 jibriSession = null;
                 return errorIq;
@@ -202,7 +208,9 @@ public class JibriRecorder
      */
     @Override
     public void onSessionStateChanged(
-        JibriSession jibriSession, JibriIq.Status newStatus, JibriIq.FailureReason failureReason)
+        JibriSession jibriSession,
+        JibriIq.Status newStatus,
+        JibriIq.FailureReason failureReason)
     {
         if (this.jibriSession != jibriSession)
         {
@@ -221,19 +229,32 @@ public class JibriRecorder
     private void publishJibriRecordingStatus(
             JibriIq.Status newStatus, JibriIq.FailureReason failureReason)
     {
-        logger.info("Got jibri status " + newStatus + " and failure " + failureReason);
+        logger.info(
+            "Got jibri status " + newStatus + " and failure " + failureReason);
         if (jibriSession == null)
         {
-            // It's possible back-to-back 'stop' requests could be received, and while processing
-            // the result of the first we set jibriSession to null, so in the processing
-            // of the second one it will already be null.
-            logger.info("Jibri session was already cleaned up, not sending new status");
+            // It's possible back-to-back 'stop' requests could be received,
+            // and while processing the result of the first we set jibriSession
+            // to null, so in the processing of the second one it will already
+            // be null.
+            logger.info(
+                "Jibri session was already cleaned up, not sending new status");
             return;
         }
         RecordingStatus recordingStatus = new RecordingStatus();
         recordingStatus.setStatus(newStatus);
         recordingStatus.setFailureReason(failureReason);
         recordingStatus.setSessionId(jibriSession.getSessionId());
+
+        if (JibriIq.Status.ON.equals(newStatus))
+        {
+            recordingStatus.setInitiator(jibriSession.getInitiator());
+        }
+        else if (JibriIq.Status.OFF.equals(newStatus))
+        {
+            recordingStatus.setInitiator(jibriSession.getTerminator());
+        }
+
         JibriIq.RecordingMode recordingMode = jibriSession.getRecordingMode();
         if (recordingMode != RecordingMode.UNDEFINED)
         {
@@ -242,7 +263,8 @@ public class JibriRecorder
 
         logger.info(
                 "Publishing new jibri-recording-status: "
-                        + recordingStatus.toXML() + " in: " + conference.getRoomName());
+                    + recordingStatus.toXML()
+                    + " in: " + conference.getRoomName());
 
         ChatRoom2 chatRoom2 = conference.getChatRoom();
 

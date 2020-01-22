@@ -17,7 +17,7 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.colibri.*;
 import net.java.sip.communicator.util.*;
 import org.jitsi.jicofo.xmpp.*;
 import org.jxmpp.jid.*;
@@ -68,10 +68,6 @@ public class BridgeMucDetector
               breweryJid,
               ColibriStatsExtension.ELEMENT_NAME,
               ColibriStatsExtension.NAMESPACE);
-
-        // We prefer to communicate with jitsi-videobridge without going
-        // through the MUC.
-        setUseOccupantJid(false);
 
         this.bridgeSelector = bridgeSelector;
     }

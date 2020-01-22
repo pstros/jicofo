@@ -17,8 +17,8 @@
  */
 package org.jitsi.jicofo.auth;
 
-import org.jitsi.impl.protocol.xmpp.extensions.*;
-import org.jitsi.util.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
+import org.jitsi.utils.*;
 import org.jivesoftware.smack.packet.*;
 import org.jxmpp.jid.*;
 

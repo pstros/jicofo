@@ -17,9 +17,8 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.util.Logger;
-
-import org.jitsi.util.*;
+import org.jitsi.utils.*;
+import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.impl.*;
 import org.jxmpp.stringprep.*;
@@ -29,7 +28,7 @@ import java.util.*;
 /**
  * Class encapsulates configuration properties for Jitsi Meet conference that
  * are attached to create conference request
- * {@link org.jitsi.impl.protocol.xmpp.extensions.ConferenceIq}. Options are
+ * {@link org.jitsi.xmpp.extensions.jitsimeet.ConferenceIq}. Options are
  * configured in 'config.js' file of Jitsi Meet Java Script application.
  *
  * @author Pawel Domas

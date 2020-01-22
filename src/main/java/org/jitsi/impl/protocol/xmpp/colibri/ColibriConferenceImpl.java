@@ -17,10 +17,9 @@
  */
 package org.jitsi.impl.protocol.xmpp.colibri;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import net.java.sip.communicator.service.protocol.*;
-import net.java.sip.communicator.util.Logger;
 
 import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.*;
@@ -30,7 +29,8 @@ import org.jitsi.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.colibri.*;
 import org.jitsi.protocol.xmpp.util.*;
 import org.jitsi.service.neomedia.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.*;
+import org.jitsi.utils.logging.Logger;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.packet.*;
@@ -553,10 +553,20 @@ public class ColibriConferenceImpl
     /**
      * {@inheritDoc}
      * </t>
-     * Does not block or wait for a response.
+     * Does not block nor wait for a response.
      */
     @Override
     public void expireChannels(ColibriConferenceIQ channelInfo)
+    {
+        expireChannels(channelInfo, false);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void expireChannels(ColibriConferenceIQ channelInfo,
+                               boolean             synchronous)
     {
         ColibriConferenceIQ request;
 
@@ -579,7 +589,23 @@ public class ColibriConferenceImpl
         {
             logRequest("Expire peer channels", request);
 
-            connection.sendStanza(request);
+            if (synchronous)
+            {
+                // Send and wait for the RESULT packet
+                try
+                {
+                    connection.sendPacketAndGetReply(request);
+                }
+                catch (OperationFailedException e)
+                {
+                    logger.error("Channel expire error", e);
+                }
+            }
+            else
+            {
+                // Send and forget
+                connection.sendStanza(request);
+            }
 
             synchronized (stateEstimationSync)
             {
@@ -864,7 +890,8 @@ public class ColibriConferenceImpl
             requestChannel.setID(channel.getID());
 
             requestChannel.setDirection(
-                    mute ? MediaDirection.SENDONLY : MediaDirection.SENDRECV);
+                    mute ? MediaDirection.SENDONLY.toString()
+                        : MediaDirection.SENDRECV.toString());
 
             requestContent.addChannel(requestChannel);
         }

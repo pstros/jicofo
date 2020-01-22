@@ -21,12 +21,10 @@ import mock.*;
 import mock.muc.*;
 
 import mock.util.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jitsimeet.*;
-import net.java.sip.communicator.impl.protocol.jabber.jinglesdp.*;
+import org.jitsi.xmpp.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 
-import net.java.sip.communicator.util.Logger;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
 
 import org.junit.*;
 import org.junit.runner.*;
@@ -92,7 +90,7 @@ public class BundleTest
 
         user1.join(chat);
 
-        MockParticipant user2 = new MockParticipant("user2", false);
+        MockParticipant user2 = new MockParticipant("user2", true);
 
         user2.join(chat);
 
@@ -109,7 +107,7 @@ public class BundleTest
         //logger.info("User1 transport info: " + user1Transport.toXML());
 
         JingleIQ user2Invite = user2.acceptInvite(4000)[0];
-        validateSessionInit(user2Invite, false);
+        validateSessionInit(user2Invite, true);
 
         user1.leave();
         user2.leave();
@@ -220,17 +218,14 @@ public class BundleTest
                 = toFind.getType().equals(toCheck.getType());
 
             boolean protoEq
-                = StringUtils.isEquals(
-                toFind.getProtocol(), toCheck.getProtocol());
+                = Objects.equals(toFind.getProtocol(), toCheck.getProtocol());
 
-            boolean ipEq = StringUtils.isEquals(
-                toFind.getIP(), toCheck.getIP());
+            boolean ipEq = Objects.equals(toFind.getIP(), toCheck.getIP());
 
             boolean portEq = toFind.getPort() == toCheck.getPort();
 
             boolean relAddrEq
-                = StringUtils.isEquals(
-                        toFind.getRelAddr(), toCheck.getRelAddr());
+                    = Objects.equals(toFind.getRelAddr(), toCheck.getRelAddr());
 
             boolean relPortEq = toFind.getRelPort() == toCheck.getRelPort();
 
@@ -245,7 +240,7 @@ public class BundleTest
             boolean networkEq = toFind.getNetwork() == toCheck.getNetwork();
 
             boolean fundEq
-                = StringUtils.isEquals(
+                = Objects.equals(
                         toFind.getFoundation(), toCheck.getFoundation());
 
             if (typeEq && protoEq && ipEq && portEq

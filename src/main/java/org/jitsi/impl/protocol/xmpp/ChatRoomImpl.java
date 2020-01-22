@@ -21,10 +21,10 @@ import net.java.sip.communicator.impl.protocol.jabber.*;
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.service.protocol.Message;
 import net.java.sip.communicator.service.protocol.event.*;
-import net.java.sip.communicator.util.Logger;
 
 import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.*;
+import org.jitsi.utils.logging.*;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.*;
@@ -325,7 +325,7 @@ public class ChatRoomImpl
     public void leave()
     {
         XMPPConnection connection = opSet.getConnection();
-        if (connection != null && connection.isConnected())
+        if (connection != null)
         {
             try
             {
@@ -336,7 +336,14 @@ public class ChatRoomImpl
             }
             catch (NotConnectedException | InterruptedException e)
             {
-                logger.error("Failed to properly leave " + muc.toString(), e);
+                // when the connection is not connected and
+                // we get NotConnectedException, this is expected (skip log)
+                if (connection.isConnected()
+                    || e instanceof InterruptedException)
+                {
+                    logger.error(
+                        "Failed to properly leave " + muc.toString(), e);
+                }
             }
             finally
             {

@@ -1,7 +1,5 @@
 /*
- * Jicofo, the Jitsi Conference Focus.
- *
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2018 - present 8x8, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,32 +15,39 @@
  */
 package org.jitsi.jicofo.rest;
 
-import java.io.*;
-import java.lang.management.*;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.logging.*;
-import javax.servlet.*;
-import javax.servlet.http.*;
-
-import org.eclipse.jetty.server.*;
-
 import org.jitsi.jicofo.*;
-import org.jitsi.util.Logger;
+import org.jitsi.jicofo.util.*;
+import org.jitsi.utils.logging.Logger;
 import org.json.simple.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.impl.*;
 import org.jxmpp.jid.parts.*;
 import org.jxmpp.stringprep.*;
 
-/**
- * Checks the health of {@link FocusManager}.
- *
- * @author Lyubomir Marinov
- * @author Pawel Domas
- */
+import javax.inject.*;
+import javax.servlet.http.*;
+import javax.ws.rs.*;
+import javax.ws.rs.core.*;
+import java.time.*;
+import java.util.*;
+import java.util.logging.*;
+
+@Path("/about/health")
+@Singleton()
 public class Health
 {
+    @Inject
+    protected FocusManagerProvider focusManagerProvider;
+
+    @Inject
+    protected Clock clock;
+
+    /**
+     * The {@code Logger} utilized by the {@code Health} class to print
+     * debug-related information.
+     */
+    private static final Logger logger = Logger.getLogger(Health.class);
+
     /**
      * The {@code JitsiMeetConfig} properties to be utilized for the purposes of
      * checking the health (status) of Jicofo.
@@ -51,16 +56,10 @@ public class Health
         = Collections.emptyMap();
 
     /**
-     * The name of the parameter that triggers known bridges listing in health
-     * check response;
+     * Interval which we consider bad for a health check and we will print
+     * some debug information.
      */
-    private static final String LIST_JVB_PARAM_NAME = "list_jvb";
-
-    /**
-     * The {@code Logger} utilized by the {@code Health} class to print
-     * debug-related information.
-     */
-    private static final Logger logger = Logger.getLogger(Health.class);
+    private static final Duration BAD_HEALTH_CHECK_INTERVAL = Duration.ofSeconds(3);
 
     /**
      * The pseudo-random generator used to generate random input for
@@ -71,23 +70,102 @@ public class Health
     /**
      * The result from the last health check we ran.
      */
-    private static int cachedStatus = -1;
+    private int cachedStatus = -1;
+
+    /**
+     * The maximum amount of time that we cache results for.
+     */
+    private static final Duration STATUS_CACHE_INTERVAL = Duration.ofSeconds(10);
 
     /**
      * The time when we ran our last health check.
      */
-    private static long cachedStatusTimestamp = -1;
+    private static Instant lastHealthCheckTime = Instant.MIN;
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response getHealth(@QueryParam("list_jvb") boolean listJvbs)
+    {
+        JSONObject activeJvbsJson = new JSONObject();
+        try
+        {
+            FocusManager focusManager = focusManagerProvider.get();
+            if (listJvbs)
+            {
+                List<Jid> activeJvbs = listBridges(focusManager);
+                if (activeJvbs.isEmpty())
+                {
+                    logger.error(
+                        "The health check failed - 0 active JVB instances !");
+                    throw new InternalServerErrorException();
+                }
+                activeJvbsJson.put("jvbs", activeJvbs);
+            }
+
+            if (Duration.between(lastHealthCheckTime, clock.instant()).compareTo(STATUS_CACHE_INTERVAL) < 0
+                && cachedStatus > 0)
+            {
+                return Response.status(cachedStatus).entity(activeJvbsJson).build();
+            }
+
+            HealthChecksMonitor monitor = null;
+            if (focusManager.isHealthChecksDebugEnabled())
+            {
+                monitor = new HealthChecksMonitor();
+                monitor.start();
+            }
+            try
+            {
+                check(focusManager);
+                cacheStatus(HttpServletResponse.SC_OK);
+                return Response.ok(activeJvbsJson).build();
+            }
+            finally
+            {
+                if (monitor != null)
+                {
+                    monitor.stop();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.error("Health check of Jicofo failed!", ex);
+            cacheStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            return Response.serverError().entity(activeJvbsJson).build();
+        }
+    }
 
     /**
-     * The maximum number of millis that we cache results for.
+     * Records the specified status and the current time so that we can readily
+     * return it if people ask us again in the next second or so.
+     *
+     * @param status the health check response status code we'd like to cache
      */
-    private static final int STATUS_CACHE_INTERVAL = 1000;
+    private void cacheStatus(int status)
+    {
+        cachedStatus = status;
+        lastHealthCheckTime = clock.instant();
+    }
 
     /**
-     * Interval which we consider bad for a health check and we will print
-     * some debug information.
+     * Returns a list of currently healthy JVBs known to Jicofo and
+     * kept alive by our {@link org.jitsi.jicofo.JvbDoctor}.
+     * @param focusManager our current context
+     * @return the list of healthy bridges currently known to this focus.
      */
-    private static final int BAD_HEALTH_CHECK_INTERVAL = 3000;
+    private static List<Jid> listBridges(FocusManager focusManager)
+    {
+        JitsiMeetServices services
+            = Objects.requireNonNull(
+            focusManager.getJitsiMeetServices(), "services");
+
+        BridgeSelector bridgeSelector
+            = Objects.requireNonNull(
+            services.getBridgeSelector(), "bridgeSelector");
+
+        return bridgeSelector.listActiveJVBs();
+    }
 
     /**
      * Checks the health (status) of a specific {@link FocusManager}.
@@ -96,7 +174,7 @@ public class Health
      * of
      * @throws Exception if an error occurs while checking the health (status)
      * of {@code focusManager} or the check determines that {@code focusManager}
-     * is not healthy 
+     * is not healthy
      */
     private static void check(FocusManager focusManager)
         throws Exception
@@ -110,7 +188,7 @@ public class Health
         {
             logger.error(
                 "No MUC service found on XMPP domain or Jicofo has not" +
-                " finished initial components discovery yet");
+                    " finished initial components discovery yet");
 
             throw new RuntimeException("No MUC component");
         }
@@ -121,21 +199,22 @@ public class Health
 
         do
         {
-            roomName
-                = JidCreate.entityBareFrom(
-                    generateRoomName(),
-                    mucService.asDomainBareJid());
+            roomName = JidCreate.entityBareFrom(
+                generateRoomName(),
+                mucService.asDomainBareJid()
+            );
         }
         while (focusManager.getConference(roomName) != null);
 
         // Create a conference with the generated room name.
         if (!focusManager.conferenceRequest(
-                    roomName,
-                    JITSI_MEET_CONFIG,
-                    Level.WARNING /* conference logging level */))
+                roomName,
+                JITSI_MEET_CONFIG,
+                Level.WARNING /* conference logging level */,
+                false /* don't include in statistics */))
         {
             throw new RuntimeException(
-                    "Failed to create conference with room name " + roomName);
+                "Failed to create conference with room name " + roomName);
         }
     }
 
@@ -152,7 +231,7 @@ public class Health
                 Localpart.from(Health.class.getName()
                     + "-"
                     + Long.toHexString(
-                            System.currentTimeMillis() + RANDOM.nextLong()));
+                        System.currentTimeMillis() + RANDOM.nextLong()));
         }
         catch (XmppStringprepException e)
         {
@@ -160,145 +239,6 @@ public class Health
             return null;
         }
     }
-
-    /**
-     * Gets a JSON representation of the health (status) of a specific
-     * {@link FocusManager}. The method is synchronized so anything other than
-     * the health check itself (which is cached) needs to return very quickly.
-     *
-     * @param focusManager the {@code FocusManager} to get the health (status)
-     * of in the form of a JSON representation
-     * @param baseRequest the original unwrapped {@link Request} object
-     * @param request the request either as the {@code Request} object or a
-     * wrapper of that request
-     * @param response the response either as the {@code Response} object or a
-     * wrapper of that response
-     * @throws IOException
-     * @throws ServletException
-     */
-    static synchronized void getJSON(
-            FocusManager focusManager,
-            Request baseRequest,
-            HttpServletRequest request,
-            HttpServletResponse response)
-        throws IOException,
-               ServletException
-    {
-        int status;
-
-        try
-        {
-            // Callers may ask us to return the list of healthy bridges that
-            // Jicofo knows about.
-            String listJvbParam = request.getParameter(LIST_JVB_PARAM_NAME);
-
-            if (Boolean.parseBoolean(listJvbParam))
-            {
-                //caller asked that we check for active bridges.
-                // we fail in case we don't
-                List<Jid> activeJVBs = listBridges(focusManager);
-
-                // ABORT here if the list is empty
-                if (activeJVBs.isEmpty())
-                {
-                    logger.error(
-                        "The health check failed - 0 active JVB instances !");
-
-                    status = HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
-                    response.setStatus(status);
-                    return;
-                }
-                else
-                {
-                    JSONObject jsonRoot = new JSONObject();
-                    jsonRoot.put("jvbs", activeJVBs);
-                    response.getWriter().append(jsonRoot.toJSONString());
-                }
-            }
-
-            //now check Jicofo's health .. unless if we just did that in which
-            //case we return the cached result.
-            if(System.currentTimeMillis() - cachedStatusTimestamp
-                    < STATUS_CACHE_INTERVAL
-                && cachedStatus > 0)
-            {
-                //return a cached result
-                status = cachedStatus;
-            }
-            else
-            {
-                HealthChecksMonitor monitor = null;
-                if (focusManager.isHealthChecksDebugEnabled())
-                {
-                    monitor = new HealthChecksMonitor();
-                    monitor.start();
-                }
-
-                try
-                {
-                    check(focusManager);
-
-                    status = cacheStatus(HttpServletResponse.SC_OK);
-                }
-                finally
-                {
-                    if (monitor != null)
-                    {
-                        monitor.stop();
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.error("Health check of Jicofo failed!", ex);
-
-            if (ex instanceof IOException)
-                throw (IOException) ex;
-            else if (ex instanceof ServletException)
-                throw (ServletException) ex;
-            else
-                status
-                    = cacheStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-        }
-
-        response.setStatus(status);
-    }
-
-    /**
-     * Records the specified status and the current time so that we can readily
-     * return it if people ask us again in the next second or so.
-     *
-     * @param status the health check response status code we'd like to cache
-     * @return the <tt>status</tt> param for convenience reasons;
-     */
-    private static int cacheStatus(int status)
-    {
-        Health.cachedStatus = status;
-        Health.cachedStatusTimestamp = System.currentTimeMillis();
-
-        return status;
-    }
-
-    /**
-     * Returns a list of currently healthy JVBs known to Jicofo and
-     * kept alive by our {@link org.jitsi.jicofo.JvbDoctor}.
-     * @param focusManager our current context
-     * @return the list of healthy bridges currently known to this focus.
-     */
-    private static List<Jid> listBridges(FocusManager focusManager)
-    {
-        JitsiMeetServices services
-            = Objects.requireNonNull(
-                    focusManager.getJitsiMeetServices(), "services");
-
-        BridgeSelector bridgeSelector
-            = Objects.requireNonNull(
-                    services.getBridgeSelector(), "bridgeSelector");
-
-        return bridgeSelector.listActiveJVBs();
-    }
-
     /**
      * Health check monitor schedules execution with a delay
      * {@link Health#BAD_HEALTH_CHECK_INTERVAL} if monitor is not stopped
@@ -329,58 +269,12 @@ public class Health
 
             // this monitoring was not stopped before the bad interval
             // this means it takes too much time
-            ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
-            ThreadInfo[] threadInfos = threadMXBean.getThreadInfo(
-                    threadMXBean.getAllThreadIds(), 100);
-            StringBuilder dbg = new StringBuilder();
-            for (ThreadInfo threadInfo : threadInfos)
-            {
-                dbg.append('"').append(threadInfo.getThreadName()).append('"');
+            String threadDump = ThreadDump.takeThreadDump();
 
-                Thread.State state = threadInfo.getThreadState();
-                dbg.append("\n   java.lang.Thread.State: ").append(state);
-
-                if (threadInfo.getLockName() != null)
-                {
-                    dbg.append(" on ").append(threadInfo.getLockName());
-                }
-                dbg.append('\n');
-
-                StackTraceElement[] stackTraceElements
-                    = threadInfo.getStackTrace();
-                for (int i = 0; i < stackTraceElements.length; i++)
-                {
-                    StackTraceElement ste = stackTraceElements[i];
-                    dbg.append("\tat " + ste.toString());
-                    dbg.append('\n');
-                    if (i == 0 && threadInfo.getLockInfo() != null)
-                    {
-                        Thread.State ts = threadInfo.getThreadState();
-                        if (ts == Thread.State.BLOCKED
-                            || ts == Thread.State.WAITING
-                            || ts == Thread.State.TIMED_WAITING)
-                        {
-                            dbg.append("\t-  " + ts + " on "
-                                + threadInfo.getLockInfo());
-                            dbg.append('\n');
-                        }
-                    }
-
-                    for (MonitorInfo mi
-                            : threadInfo.getLockedMonitors())
-                    {
-                        if (mi.getLockedStackDepth() == i) {
-                            dbg.append("\t-  locked " + mi);
-                            dbg.append('\n');
-                        }
-                    }
-                }
-                dbg.append("\n\n");
-            }
             logger.error("Health check took "
                 + (System.currentTimeMillis() - this.startedAt)
                 + " ms. \n"
-                + dbg.toString());
+                + threadDump);
         }
 
         /**
@@ -392,7 +286,7 @@ public class Health
         {
             this.startedAt = System.currentTimeMillis();
             this.monitorTimer = new Timer(getClass().getSimpleName(), true);
-            this.monitorTimer.schedule(this, BAD_HEALTH_CHECK_INTERVAL);
+            this.monitorTimer.schedule(this, BAD_HEALTH_CHECK_INTERVAL.toMillis());
         }
 
         /**

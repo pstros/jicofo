@@ -17,16 +17,16 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.util.Logger;
+import org.jitsi.xmpp.extensions.colibri.*;
 
 import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.discovery.Version;
 import org.jitsi.jicofo.event.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.service.configuration.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.*;
 
+import org.jitsi.utils.logging.*;
 import org.jivesoftware.smack.packet.*;
 
 import org.jxmpp.jid.*;
@@ -86,6 +86,12 @@ public class BridgeSelector
      */
     public static final String BRIDGE_FAILURE_RESET_THRESHOLD_PNAME
         = "org.jitsi.focus.BRIDGE_FAILURE_RESET_THRESHOLD";
+
+    /**
+     * The name of the property which configured the local region.
+     */
+    public static final String LOCAL_REGION_PNAME
+        = "org.jitsi.jicofo.BridgeSelector.LOCAL_REGION";
 
     /**
      * Five minutes.
@@ -152,6 +158,8 @@ public class BridgeSelector
      */
     private BridgeSelectionStrategy createBridgeSelectionStrategy()
     {
+        BridgeSelectionStrategy strategy = null;
+
         ConfigurationService config = FocusBundleActivator.getConfigService();
         if (config != null)
         {
@@ -164,7 +172,8 @@ public class BridgeSelector
                 try
                 {
                     Class clazz = Class.forName(clazzName);
-                    return (BridgeSelectionStrategy)clazz.newInstance();
+                    strategy = (BridgeSelectionStrategy)clazz.newInstance();
+                    logger.info("Using " + clazzName);
                 }
                 catch (Exception e)
                 {
@@ -173,8 +182,13 @@ public class BridgeSelector
             }
         }
 
-        logger.info("Using SingleBridgeSelectionStrategy");
-        return new SingleBridgeSelectionStrategy();
+        if (strategy == null)
+        {
+            strategy = new SingleBridgeSelectionStrategy();
+        }
+
+
+        return strategy;
     }
 
     /**
@@ -606,9 +620,12 @@ public class BridgeSelector
                 config.getLong(
                         BRIDGE_FAILURE_RESET_THRESHOLD_PNAME,
                         DEFAULT_FAILURE_RESET_THRESHOLD));
-
         logger.info(
             "Bridge failure reset threshold: " + getFailureResetThreshold());
+
+        bridgeSelectionStrategy.localRegion
+                = config.getString(LOCAL_REGION_PNAME, null);
+        logger.info("Local region: " + bridgeSelectionStrategy.localRegion);
 
         this.eventAdmin = FocusBundleActivator.getEventAdmin();
         if (eventAdmin == null)
@@ -631,10 +648,9 @@ public class BridgeSelector
      * @param bridgeJid the XMPP address of the videobridge for which we want to
      *        obtain the version.
      *
-     * @return {@link Version} instance which holds the details about JVB
-     *         version or <tt>null</tt> if unknown.
+     * @return JVB version or <tt>null</tt> if unknown.
      */
-    synchronized public Version getBridgeVersion(Jid bridgeJid)
+    synchronized public String getBridgeVersion(Jid bridgeJid)
     {
         Bridge bridge = bridges.get(bridgeJid);
 
@@ -671,6 +687,11 @@ public class BridgeSelector
      */
     private static abstract class BridgeSelectionStrategy
     {
+        /**
+         * The local region of the jicofo instance.
+         */
+        private String localRegion = null;
+
         /**
          * Selects a bridge to be used for a specific
          * {@link JitsiMeetConference} and a specific {@link Participant}.
@@ -744,28 +765,48 @@ public class BridgeSelector
                                      JitsiMeetConference conference,
                                      String participantRegion)
         {
+            Bridge bridge = null;
+
             // Prefer a bridge in the participant's region.
             if (participantRegion != null)
             {
-                for (Bridge bridge : bridges)
-                {
-                    if (bridge.isOperational()
-                        && participantRegion.equals(bridge.getRegion()))
-                    {
-                        return bridge;
-                    }
-                }
+                bridge = findFirstOperationalInRegion(bridges, participantRegion);
             }
 
-            for (Bridge bridge : bridges)
+            // Otherwise, prefer a bridge in the local region.
+            if (bridge == null)
             {
-                if (bridge.isOperational())
-                {
-                    return bridge;
-                }
+                bridge = findFirstOperationalInRegion(bridges, localRegion);
             }
 
-            return null;
+            // Otherwise, just find the first operational bridge.
+            if (bridge == null)
+            {
+                bridge = findFirstOperationalInRegion(bridges, null);
+            }
+
+            return bridge;
+        }
+
+        /**
+         * Returns the first operational bridge in the given list which matches
+         * the given region (if the given regio is {@code null} the region is
+         * not matched).
+         *
+         * @param bridges
+         * @param region
+         * @return
+         */
+        private Bridge findFirstOperationalInRegion(
+                List<Bridge> bridges,
+                String region)
+        {
+            return bridges.stream()
+                    .filter(Bridge::isOperational)
+                    .filter(
+                        b -> region == null || region.equals(b.getRegion()))
+                    .findFirst()
+                    .orElse(null);
         }
 
         /**
@@ -916,7 +957,7 @@ public class BridgeSelector
             {
                 // We don't know the participant's region. Use the least loaded
                 // existing bridge in the conference.
-                return selectFirst(bridges, conferenceBridges);
+                return findFirst(bridges, conferenceBridges);
             }
 
             // We know the participant's region.
@@ -927,7 +968,7 @@ public class BridgeSelector
                     .collect(Collectors.toList());
             if (!conferenceBridgesInRegion.isEmpty())
             {
-                return selectFirst(bridges, conferenceBridgesInRegion);
+                return findFirst(bridges, conferenceBridgesInRegion);
             }
 
             // The conference has no bridges in the participant region. Try
@@ -945,7 +986,7 @@ public class BridgeSelector
             // least loaded of the existing conference bridges.
             // TODO: perhaps use a bridge in a nearby region (if we have data
             // about the topology of the regions).
-            return selectFirst(bridges, conferenceBridges);
+            return findFirst(bridges, conferenceBridges);
         }
 
         /**
@@ -957,7 +998,7 @@ public class BridgeSelector
          * @return the bridge from {@code selectFrom} which occurs first in
          * {@code order}.
          */
-        private Bridge selectFirst(
+        private Bridge findFirst(
             List<Bridge> selectFrom, List<Bridge> order)
         {
             return order.stream()

@@ -18,14 +18,15 @@
 package mock.util;
 
 import mock.*;
+
 import mock.jvb.*;
 import mock.muc.*;
 
 import mock.xmpp.*;
-import org.jitsi.impl.neomedia.rtp.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.osgi.*;
 
+import org.jitsi_modified.impl.neomedia.rtp.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.impl.*;
 import org.osgi.framework.*;
@@ -170,12 +171,10 @@ public class TestConference
 
     public long[] getSimulcastLayersSSRCs(Jid peerJid)
     {
-        ConferenceUtility confUtility = getConferenceUtility();
         String conferenceId = conference.getJvbConferenceId();
-        String videoChannelId
-            = confUtility.getParticipantVideoChannelId(peerJid);
+        String endpointId = peerJid.getResourceOrEmpty().toString();
         List<RTPEncodingDesc> layers
-            = mockBridge.getSimulcastLayers(conferenceId, videoChannelId);
+            = mockBridge.getSimulcastLayers(conferenceId, endpointId);
 
         long[] ssrcs = new long[layers.size()];
         int idx = 0;

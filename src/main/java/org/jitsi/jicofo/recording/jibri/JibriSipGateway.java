@@ -17,10 +17,11 @@
  */
 package org.jitsi.jicofo.recording.jibri;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.*;
+import org.jitsi.xmpp.extensions.jibri.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.*;
+import org.jitsi.utils.logging.*;
 import org.jivesoftware.smack.packet.*;
 
 import java.util.*;
@@ -98,7 +99,7 @@ public class JibriSipGateway
             List<JibriSession> sessions = new ArrayList<>(sipSessions.values());
             for (JibriSession session : sessions)
             {
-                session.stop();
+                session.stop(null);
             }
         }
         finally
@@ -131,6 +132,7 @@ public class JibriSipGateway
                 = new JibriSession(
                         this,
                         conference.getRoomName(),
+                        iq.getFrom(),
                         globalConfig.getJibriPendingTimeout(),
                         globalConfig.getNumJibriRetries(),
                         connection,

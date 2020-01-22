@@ -36,6 +36,14 @@ public class JitsiMeetGlobalConfig
         = Logger.getLogger(JitsiMeetGlobalConfig.class);
 
     /**
+     * The name of the property which controls whether jicofo will inject a
+     * random SSRC for endpoints which don't advertise any SSRCs. This is a
+     * temporary workaround for an issue with signaling endpoints for Octo.
+     */
+    private final static String INJECT_SSRC_FOR_RECVONLY_ENDPOINTS
+            = "org.jitsi.jicofo.INJECT_SSRC_FOR_RECVONLY_ENDPOINTS";
+
+    /**
      * The name of configuration property that disable auto owner role granting.
      */
     private final static String DISABLE_AUTO_OWNER_PNAME
@@ -132,6 +140,13 @@ public class JitsiMeetGlobalConfig
     private ServiceRegistration<JitsiMeetGlobalConfig> serviceRegistration;
 
     /**
+     * Whether jicofo should inject a random SSRC for endpoints which don't
+     * advertise any SSRCs. This is a temporary workaround for an issue with
+     * signaling endpoints for Octo.
+     */
+    boolean injectSsrcForRecvOnlyEndpoints = false;
+
+    /**
      * Runs <tt>JitsiMeetGlobalConfig</tt> service on given OSGi context.
      * @param ctx the OSGi context to which new service instance will be bound.
      * @return an instance of newly created and registered global config service
@@ -209,7 +224,8 @@ public class JitsiMeetGlobalConfig
             logger.warn("Jibri PENDING timeouts are disabled");
         }
 
-        numJibriRetries = configService.getInt(NUM_JIBRI_RETRIES_PNAME, DEFAULT_NUM_JIBRI_RETRIES);
+        numJibriRetries = configService.getInt(
+            NUM_JIBRI_RETRIES_PNAME, DEFAULT_NUM_JIBRI_RETRIES);
         if (numJibriRetries >= 0)
         {
             logger.info("Will attempt a maximum of " + numJibriRetries +
@@ -217,7 +233,8 @@ public class JitsiMeetGlobalConfig
         }
         else
         {
-            logger.info("Will retry Jibri requests infinitely (if a Jibri is available)");
+            logger.info("Will retry Jibri requests infinitely "
+                + "(if a Jibri is available)");
         }
 
         singleParticipantTimeout
@@ -228,6 +245,10 @@ public class JitsiMeetGlobalConfig
         logger.info(
                 "Lonely participants will be \"terminated\" after "
                     + singleParticipantTimeout +" milliseconds");
+
+        injectSsrcForRecvOnlyEndpoints
+                = configService.getBoolean(
+                        INJECT_SSRC_FOR_RECVONLY_ENDPOINTS, false);
     }
 
     /**
@@ -277,7 +298,8 @@ public class JitsiMeetGlobalConfig
     }
 
     /**
-     * Tells how many retry attempts we'll make for a Jibri request when a Jibri fails
+     * Tells how many retry attempts we'll make for a Jibri request when
+     * a Jibri fails
      * @return the amount of retry attempts we'll make for a Jibri request when
      * a Jibri fails
      */

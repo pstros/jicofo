@@ -22,7 +22,7 @@ import mock.jvb.*;
 import mock.xmpp.*;
 import mock.xmpp.pubsub.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.colibri.*;
 import net.java.sip.communicator.util.*;
 
 import org.jitsi.eventadmin.*;
@@ -30,8 +30,7 @@ import org.jitsi.jicofo.discovery.*;
 import org.jitsi.jicofo.event.*;
 import org.jitsi.jicofo.util.*;
 import org.jitsi.protocol.xmpp.*;
-import org.jitsi.util.*;
-import org.jitsi.videobridge.stats.*;
+import org.jitsi.utils.*;
 
 import org.jivesoftware.smack.packet.*;
 
@@ -46,6 +45,7 @@ import org.mockito.*;
 import java.util.*;
 import java.util.concurrent.*;
 
+import static org.jitsi.xmpp.extensions.colibri.ColibriStatsExtension.*;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
@@ -363,7 +363,7 @@ public class PubSubBridgeSelectorTest
 
         statsExtension.addStat(
             new ColibriStatsExtension.Stat(
-                VideobridgeStatistics.CONFERENCES, "" + conferenceCount));
+                CONFERENCES, "" + conferenceCount));
 
         subOpSet.fireSubscriptionNotification(
             sharedPubSubNode, itemId.toString(), statsExtension);

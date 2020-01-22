@@ -22,8 +22,8 @@ import mock.jvb.*;
 import mock.xmpp.*;
 import mock.xmpp.colibri.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import net.java.sip.communicator.service.protocol.*;
 
 import org.jitsi.jicofo.util.*;
@@ -191,15 +191,7 @@ public class ColibriThreadingTest
         }
 
         assertEquals(1, mockBridge.getConferenceCount());
-        assertEquals(
-            allocators.length,
-            mockBridge.getChannelCountByContent("audio"));
-        assertEquals(
-            allocators.length,
-            mockBridge.getChannelCountByContent("video"));
-        assertEquals(
-            allocators.length,
-            mockBridge.getChannelCountByContent("data"));
+        assertEquals(allocators.length * 3, mockBridge.getChannelsCount());
 
         mockBridge.stop(osgi.bc);
     }
