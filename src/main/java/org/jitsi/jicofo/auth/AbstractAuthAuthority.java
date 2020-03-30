@@ -21,15 +21,16 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.*;
 
-import org.jitsi.impl.protocol.xmpp.extensions.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.jicofo.event.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.
+        *;
+import org.jitsi.utils.logging.Logger;
 import org.jitsi.eventadmin.*;
 import org.jivesoftware.smack.packet.*;
 
 import net.java.sip.communicator.util.*;
-import net.java.sip.communicator.util.Logger;
 import org.jxmpp.jid.*;
 
 /**

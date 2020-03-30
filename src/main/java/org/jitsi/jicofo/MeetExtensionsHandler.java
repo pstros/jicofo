@@ -1,7 +1,7 @@
 /*
  * Jicofo, the Jitsi Conference Focus.
  *
- * Copyright @ 2015 Atlassian Pty Ltd
+ * Copyright @ 2018 - present 8x8, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,19 +17,20 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.rayo.*;
+import org.jitsi.xmpp.extensions.rayo.*;
 import net.java.sip.communicator.service.protocol.*;
-import net.java.sip.communicator.util.Logger;
 
-import org.jitsi.impl.protocol.xmpp.extensions.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import org.jitsi.jicofo.jigasi.*;
 import org.jitsi.protocol.xmpp.*;
+import org.jitsi.utils.logging.*;
 import org.jivesoftware.smack.iqrequest.*;
 import org.jivesoftware.smack.packet.*;
 import org.jivesoftware.smack.packet.id.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
+import java.util.stream.*;
 
 /**
  * Class handles various Jitsi Meet extensions IQs like {@link MuteIq}.
@@ -177,7 +178,7 @@ public class MeetExtensionsHandler
             if (!muteIq.getFrom().equals(jid))
             {
                 MuteIq muteStatusUpdate = new MuteIq();
-                muteStatusUpdate.setJid(jid);
+                muteStatusUpdate.setActor(from);
                 muteStatusUpdate.setType(IQ.Type.set);
                 muteStatusUpdate.setTo(jid);
 
@@ -203,13 +204,13 @@ public class MeetExtensionsHandler
      * @param dialIq the iq to send.
      * @param retryCount the number of attempts to be made for sending this iq,
      * if no reply is received from the remote side.
-     * @param filterJigasis <tt>null</tt> or a list of jigasi Jids which
+     * @param exclude <tt>null</tt> or a list of jigasi Jids which
      * we already tried sending in attempt to retry.
      *
      * @return the iq to be sent as a reply.
      */
     private IQ handleRayoIQ(RayoIqProvider.DialIq dialIq, int retryCount,
-                            List<Jid> filterJigasis)
+                            List<Jid> exclude)
     {
         Jid from = dialIq.getFrom();
 
@@ -238,11 +239,18 @@ public class MeetExtensionsHandler
                 dialIq, XMPPError.getBuilder(XMPPError.Condition.not_allowed));
         }
 
+
+        Set<String> bridgeRegions = conference.getBridges().stream()
+            .map(b -> b.getRegion())
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+
         // Check if Jigasi is available
         Jid jigasiJid;
         JigasiDetector detector = conference.getServices().getJigasiDetector();
         if (detector == null
-            || (jigasiJid = detector.selectJigasi(filterJigasis)) == null)
+            || (jigasiJid = detector.selectJigasi(
+                    exclude, bridgeRegions)) == null)
         {
             jigasiJid = conference.getServices().getSipGateway();
         }
@@ -270,15 +278,14 @@ public class MeetExtensionsHandler
             {
                 if (retryCount > 0)
                 {
-                    if (filterJigasis == null)
+                    if (exclude == null)
                     {
-                        filterJigasis = new ArrayList<>();
+                        exclude = new ArrayList<>();
                     }
-                    filterJigasis.add(jigasiJid);
+                    exclude.add(jigasiJid);
 
                     // let's retry lowering the number of attempts
-                    return this.handleRayoIQ(
-                        dialIq, retryCount - 1, filterJigasis);
+                    return this.handleRayoIQ(dialIq, retryCount - 1, exclude);
                 }
                 else
                 {

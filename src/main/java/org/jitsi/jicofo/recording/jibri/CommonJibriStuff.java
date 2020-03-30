@@ -17,11 +17,11 @@
  */
 package org.jitsi.jicofo.recording.jibri;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.*;
+import org.jitsi.xmpp.extensions.jibri.*;
 import net.java.sip.communicator.service.protocol.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
 import org.jivesoftware.smack.packet.*;
 import org.jxmpp.jid.*;
 
@@ -269,7 +269,7 @@ public abstract class CommonJibriStuff
         else if (JibriIq.Action.STOP.equals(action) &&
             jibriSession != null)
         {
-            jibriSession.stop();
+            jibriSession.stop(iq.getFrom());
             return IQ.createResultIQ(iq);
         }
 

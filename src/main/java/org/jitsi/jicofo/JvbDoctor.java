@@ -17,7 +17,7 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.health.*;
+import org.jitsi.xmpp.extensions.health.*;
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.service.protocol.event.*;
 import net.java.sip.communicator.util.*;
@@ -28,7 +28,7 @@ import org.jitsi.jicofo.event.*;
 import org.jitsi.jicofo.osgi.*;
 import org.jitsi.osgi.*;
 import org.jitsi.protocol.xmpp.*;
-import org.jitsi.util.Logger;
+import org.jitsi.utils.logging.Logger;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.packet.*;

@@ -19,7 +19,7 @@ package org.jitsi.jicofo;
 
 import net.java.sip.communicator.service.protocol.*;
 import org.jitsi.protocol.xmpp.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
@@ -102,4 +102,9 @@ public interface JitsiMeetConference
      *         participant or <tt>false</tt> otherwise.
      */
     boolean isFocusMember(Jid jid);
+
+    /**
+     * Whether this conference should be considered when generating statistics.
+     */
+    boolean includeInStatistics();
 }

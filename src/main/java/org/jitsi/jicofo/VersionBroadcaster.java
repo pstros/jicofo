@@ -17,7 +17,8 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jitsimeet.*;
+import org.jitsi.utils.version.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.util.*;
 
@@ -25,12 +26,12 @@ import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.discovery.Version;
 import org.jitsi.jicofo.event.*;
 import org.jitsi.osgi.*;
-import org.jitsi.service.version.*;
 
 import org.jxmpp.jid.*;
 import org.osgi.framework.*;
 
 import java.util.*;
+import java.util.stream.*;
 
 /**
  * The class listens for "focus joined room" and "conference created" events
@@ -163,7 +164,7 @@ public class VersionBroadcaster
         }
 
         // Conference focus
-        org.jitsi.service.version.Version jicofoVersion
+        org.jitsi.utils.version.Version jicofoVersion
             = versionService.getCurrentVersion();
         versionsExtension.addComponentVersion(
                 ComponentVersionsExtension.COMPONENT_FOCUS,
@@ -171,18 +172,18 @@ public class VersionBroadcaster
                     + "(" + jicofoVersion.toString() + ","
                     + System.getProperty("os.name") + ")");
 
-        // Videobridge
-        // It is not be reported for FOCUS_JOINED_ROOM_TOPIC
-        Jid bridgeJid
-                = (Jid)event.getProperty(EventFactory.BRIDGE_JID_KEY);
-        Version jvbVersion
-            = bridgeJid == null
-                ? null : meetServices.getBridgeVersion(bridgeJid);
-        if (jvbVersion != null)
+        String jvbVersions = conference.getBridges().stream()
+            .map(b -> b.getVersion())
+            .filter(Objects::nonNull)
+            .distinct()
+            .sorted()
+            .collect(Collectors.joining(", "));
+
+        if (jvbVersions.length() > 0)
         {
             versionsExtension.addComponentVersion(
                     ComponentVersionsExtension.COMPONENT_VIDEOBRIDGE,
-                    jvbVersion.getNameVersionOsString());
+                    String.join(",", jvbVersions));
         }
 
         meetTools.sendPresenceExtension(chatRoom, versionsExtension);

@@ -20,10 +20,10 @@ package org.jitsi.jicofo;
 import mock.*;
 import mock.util.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.service.shutdown.*;
+import org.jitsi.meet.*;
+import org.jitsi.xmpp.extensions.colibri.*;
 
-import org.jitsi.impl.protocol.xmpp.extensions.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import org.jitsi.jicofo.xmpp.*;
 import org.jitsi.xmpp.util.*;
 
@@ -73,8 +73,7 @@ public class ShutdownTest
 
         focusComponent = MockMainMethodActivator.getFocusComponent();
 
-        conf1 = TestConference.allocate(
-        osgi.bc, serverName, roomName);
+        conf1 = TestConference.allocate(osgi.bc, serverName, roomName);
 
         conf1User1 = new MockParticipant("C1U1");
         conf1User2 = new MockParticipant("C1U2");

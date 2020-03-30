@@ -21,10 +21,8 @@ import mock.*;
 import mock.xmpp.*;
 import mock.xmpp.pubsub.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.colibri.*;
 import net.java.sip.communicator.util.*;
-
-import org.jitsi.videobridge.stats.*;
 
 import org.jivesoftware.smack.packet.*;
 
@@ -36,6 +34,7 @@ import org.jxmpp.jid.impl.*;
 
 import java.util.*;
 
+import static org.jitsi.xmpp.extensions.colibri.ColibriStatsExtension.*;
 import static org.junit.Assert.*;
 
 /**
@@ -295,13 +294,16 @@ public class BridgeSelectorTest
             BridgeSelector.DEFAULT_FAILURE_RESET_THRESHOLD);
     }
 
-    ExtensionElement createJvbStats(int videoStreamCount)
+    ExtensionElement createJvbStats(int bitrate)
     {
         ColibriStatsExtension statsExtension = new ColibriStatsExtension();
 
         statsExtension.addStat(
             new ColibriStatsExtension.Stat(
-                VideobridgeStatistics.VIDEOSTREAMS, "" + videoStreamCount));
+                BITRATE_DOWNLOAD, bitrate));
+        statsExtension.addStat(
+                new ColibriStatsExtension.Stat(
+                BITRATE_UPLOAD, bitrate));
 
         return statsExtension;
     }

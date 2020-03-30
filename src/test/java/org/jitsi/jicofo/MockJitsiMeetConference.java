@@ -19,7 +19,7 @@ package org.jitsi.jicofo;
 
 import net.java.sip.communicator.service.protocol.*;
 import org.jitsi.protocol.xmpp.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
@@ -100,4 +100,9 @@ public class MockJitsiMeetConference
         return 0;
     }
 
+    @Override
+    public boolean includeInStatistics()
+    {
+        return true;
+    }
 }
