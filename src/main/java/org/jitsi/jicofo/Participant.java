@@ -17,12 +17,13 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 
 import org.jitsi.jicofo.discovery.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.util.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
@@ -83,21 +84,12 @@ public class Participant
     private final Logger logger;
 
     /**
-     * Stores information about bundled transport if {@link #hasBundleSupport()}
-     * returns <tt>true</tt>.
+     * Stores information about bundled transport
      */
     private IceUdpTransportPacketExtension bundleTransport;
 
     /**
-     * Maps ICE transport information to the name of Colibri content. This is
-     * "non-bundled" transport which is used when {@link #hasBundleSupport()}
-     * returns <tt>false</tt>.
-     */
-    private Map<String, IceUdpTransportPacketExtension> transportMap
-        = new HashMap<>();
-
-    /**
-     * The list of XMPP features supported by this participant. 
+     * The list of XMPP features supported by this participant.
      */
     private List<String> supportedFeatures = new ArrayList<>();
 
@@ -214,16 +206,24 @@ public class Participant
     }
 
     /**
-     * FIXME: we need to remove "is SIP gateway code", but there are still 
+     * FIXME: we need to remove "is SIP gateway code", but there are still
      * situations where we need to know whether given peer is a human or not.
      * For example when we close browser window and only SIP gateway stays
      * we should destroy the conference and close SIP connection.
-     *  
+     *
      * Returns <tt>true</tt> if this participant belongs to SIP gateway service.
      */
     public boolean isSipGateway()
     {
-        return supportedFeatures.contains("http://jitsi.org/protocol/jigasi");
+        return supportedFeatures.contains(DiscoveryUtil.FEATURE_JIGASI);
+    }
+
+    /**
+     * Returns <tt>true</tt> if this participant is a Jibri instance.
+    */
+    public boolean isJibri()
+    {
+        return supportedFeatures.contains("http://jitsi.org/protocol/jibri");
     }
 
     /**
@@ -232,6 +232,14 @@ public class Participant
     public boolean hasAudioSupport()
     {
         return supportedFeatures.contains(DiscoveryUtil.FEATURE_AUDIO);
+    }
+
+    /**
+     * Returns <tt>true</tt> if RTP audio can be muted for this peer.
+     */
+    public boolean hasAudioMuteSupport()
+    {
+        return supportedFeatures.contains(DiscoveryUtil.FEATURE_AUDIO_MUTE);
     }
 
     /**
@@ -251,7 +259,7 @@ public class Participant
     }
 
     /**
-     * Returns <tt>true</tt> if this peer supports DTLS/SCTP. 
+     * Returns <tt>true</tt> if this peer supports DTLS/SCTP.
      */
     public boolean hasSctpSupport()
     {
@@ -260,13 +268,17 @@ public class Participant
 
     /**
      * Sets the list of features supported by this participant.
-     * @see DiscoveryUtil for the list of predefined feature constants. 
+     * @see DiscoveryUtil for the list of predefined feature constants.
      * @param supportedFeatures the list of features to set.
      */
     public void setSupportedFeatures(List<String> supportedFeatures)
+        throws UnsupportedFeatureConfigurationException
     {
         this.supportedFeatures
             = Objects.requireNonNull(supportedFeatures, "supportedFeatures");
+        if (!hasBundleSupport()) {
+            throw new UnsupportedFeatureConfigurationException("Participant doesn't support bundle, which is required");
+        }
     }
 
     /**
@@ -299,10 +311,9 @@ public class Participant
 
     /**
      * Extracts and stores transport information from given map of Jingle
-     * content. Depending on the {@link #hasBundleSupport()} either 'bundle' or
-     * 'non-bundle' transport information will be stored. If we already have the
-     * transport information it will be merged into the currently stored one
-     * with {@link TransportSignaling#mergeTransportExtension}.
+     * content.  If we already have the transport information it will be
+     * merged into the currently stored one with
+     * {@link TransportSignaling#mergeTransportExtension}.
      *
      * @param contents the list of <tt>ContentPacketExtension</tt> from one of
      * jingle message which can potentially contain transport info like
@@ -310,69 +321,40 @@ public class Participant
      */
     public void addTransportFromJingle(List<ContentPacketExtension> contents)
     {
-        if (hasBundleSupport())
+        // Select first transport
+        IceUdpTransportPacketExtension transport = null;
+        for (ContentPacketExtension cpe : contents)
         {
-            // Select first transport
-            IceUdpTransportPacketExtension transport = null;
-            for (ContentPacketExtension cpe : contents)
+            IceUdpTransportPacketExtension contentTransport
+                = cpe.getFirstChildOfType(
+                        IceUdpTransportPacketExtension.class);
+            if (contentTransport != null)
             {
-                IceUdpTransportPacketExtension contentTransport
-                    = cpe.getFirstChildOfType(
-                            IceUdpTransportPacketExtension.class);
-                if (contentTransport != null)
-                {
-                    transport = contentTransport;
-                    break;
-                }
+                transport = contentTransport;
+                break;
             }
-            if (transport == null)
-            {
-                logger.error(
-                    "No valid transport supplied in transport-update from "
-                        + getChatMember().getContactAddress());
-                return;
-            }
+        }
+        if (transport == null)
+        {
+            logger.error(
+                "No valid transport supplied in transport-update from "
+                    + getChatMember().getContactAddress());
+            return;
+        }
 
-            if (!transport.isRtcpMux())
-            {
-                transport.addChildExtension(new RtcpmuxPacketExtension());
-            }
+        if (!transport.isRtcpMux())
+        {
+            transport.addChildExtension(new RtcpmuxPacketExtension());
+        }
 
-            if (bundleTransport == null)
-            {
-                bundleTransport = transport;
-            }
-            else
-            {
-                TransportSignaling.mergeTransportExtension(
-                        bundleTransport, transport);
-            }
+        if (bundleTransport == null)
+        {
+            bundleTransport = transport;
         }
         else
         {
-            for (ContentPacketExtension cpe : contents)
-            {
-                IceUdpTransportPacketExtension srcTransport
-                    = cpe.getFirstChildOfType(
-                            IceUdpTransportPacketExtension.class);
-
-                if (srcTransport != null)
-                {
-                    String contentName = cpe.getName().toLowerCase();
-                    IceUdpTransportPacketExtension dstTransport
-                        = transportMap.get(contentName);
-
-                    if (dstTransport == null)
-                    {
-                        transportMap.put(contentName, srcTransport);
-                    }
-                    else
-                    {
-                        TransportSignaling.mergeTransportExtension(
-                                dstTransport, srcTransport);
-                    }
-                }
-            }
+            TransportSignaling.mergeTransportExtension(
+                    bundleTransport, transport);
         }
     }
 
@@ -389,27 +371,21 @@ public class Participant
     }
 
     /**
-     * Returns 'non-bundled' transport information stored for this
-     * <tt>Participant</tt>.
-     *
-     * @return a map of <tt>IceUdpTransportPacketExtension</tt> to Colibri
-     * content name which describes 'non-bundled' transport of this participant
-     * or <tt>null</tt> either if it's not available yet or if 'bundled'
-     * transport is being used.
-     */
-    public Map<String, IceUdpTransportPacketExtension> getTransportMap()
-    {
-        return transportMap;
-    }
-
-    /**
      * Clears any ICE transport information currently stored for this
      * participant.
      */
     public void clearTransportInfo()
     {
         bundleTransport = null;
-        transportMap = new HashMap<>();
+    }
+
+    /**
+     * Returns the {@link org.jitsi.jicofo.JitsiMeetConferenceImpl.BridgeSession}
+     * or <tt>null</tt>.
+     */
+    public JitsiMeetConferenceImpl.BridgeSession getBridgeSession()
+    {
+        return bridgeSession;
     }
 
     /**
@@ -488,6 +464,7 @@ public class Participant
      * @return {@code BridgeSession} from which this {@code Participant} has
      * been removed or {@code null} if this {@link Participant} was not part
      * of any bridge session.
+     * @see org.jitsi.protocol.xmpp.colibri.ColibriConference#expireChannels(ColibriConferenceIQ)
      */
     JitsiMeetConferenceImpl.BridgeSession terminateBridgeSession()
     {
@@ -508,7 +485,15 @@ public class Participant
     @Override
     public String toString()
     {
-        return "Participant[endpointId=" + getEndpointId() + "]";
+        return "Participant[" + getMucJid() + "]@" + hashCode();
     }
 
+}
+
+class UnsupportedFeatureConfigurationException extends Exception
+{
+    public UnsupportedFeatureConfigurationException(String msg)
+    {
+        super(msg);
+    }
 }

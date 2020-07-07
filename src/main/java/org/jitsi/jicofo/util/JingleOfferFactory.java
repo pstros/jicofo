@@ -17,14 +17,13 @@
  */
 package org.jitsi.jicofo.util;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 
 import org.jitsi.service.configuration.*;
 import org.jitsi.service.neomedia.*;
 import org.jitsi.service.neomedia.codec.*;
 
 import java.net.*;
-import java.util.*;
 
 /**
  * Contains factory methods for creating Jingle offer sent in 'session-invite'
@@ -44,6 +43,12 @@ public class JingleOfferFactory
     public static final String VP8_PT_PNAME = "org.jitsi.jicofo.VP8_PT";
 
     /**
+     * The name of the property which enables VP8.
+     */
+    public static final String ENABLE_VP8_PNAME
+            = "org.jitsi.jicofo.ENABLE_VP8";
+
+    /**
      * The property name of the VP8 RTX payload type to include in the Jingle
      * session-invite.
      */
@@ -54,6 +59,12 @@ public class JingleOfferFactory
      * session-invite.
      */
     public static final String VP9_PT_PNAME = "org.jitsi.jicofo.VP9_PT";
+
+    /**
+     * The name of the property which enables VP9.
+     */
+    public static final String ENABLE_VP9_PNAME
+            = "org.jitsi.jicofo.ENABLE_VP9";
 
     /**
      * The property name of the VP9 RTX payload type to include in the Jingle
@@ -67,6 +78,12 @@ public class JingleOfferFactory
      * session-invite.
      */
     public static final String H264_PT_PNAME = "org.jitsi.jicofo.H264_PT";
+
+    /**
+     * The name of the property which enables H264.
+     */
+    public static final String ENABLE_H264_PNAME
+            = "org.jitsi.jicofo.ENABLE_H264";
 
     /**
      * The property name of the H264 RTX payload type to include in the Jingle
@@ -108,9 +125,19 @@ public class JingleOfferFactory
     public static final String ENABLE_RID_PNAME = "org.jitsi.jicofo.ENABLE_RID";
 
     /**
+     * The ID of the transport-cc header extension.
+     */
+    private static final String TRANSPORT_CC_ID = "5";
+
+    /**
      * The VP8 payload type to include in the Jingle session-invite.
      */
     private final int VP8_PT;
+
+    /**
+     * Whether VP8 is enabled.
+     */
+    private final boolean ENABLE_VP8;
 
     /**
      * The VP8 RTX payload type to include in the Jingle session-invite.
@@ -123,6 +150,11 @@ public class JingleOfferFactory
     private final int VP9_PT;
 
     /**
+     * Whether VP9 is enabled.
+     */
+    private final boolean ENABLE_VP9;
+
+    /**
      * The VP9 RTX payload type to include in the Jingle session-invite.
      */
     private final int VP9_RTX_PT;
@@ -131,6 +163,11 @@ public class JingleOfferFactory
      * The H264 payload type to include in the Jingle session-invite.
      */
     private final int H264_PT;
+
+    /**
+     * Whether H264 is enabled.
+     */
+    private final boolean ENABLE_H264;
 
     /**
      * The H264 RTX payload type to include in the Jingle session-invite.
@@ -172,10 +209,13 @@ public class JingleOfferFactory
     public JingleOfferFactory(ConfigurationService cfg)
     {
         VP8_PT = cfg != null ? cfg.getInt(VP8_PT_PNAME, 100) : 100;
+        ENABLE_VP8 = cfg != null ? cfg.getBoolean(ENABLE_VP8_PNAME, true) : true;
         VP8_RTX_PT = cfg != null ? cfg.getInt(VP8_RTX_PT_PNAME, 96) : 96;
         VP9_PT = cfg != null ? cfg.getInt(VP9_PT_PNAME, 101) : 101;
+        ENABLE_VP9 = cfg != null ? cfg.getBoolean(ENABLE_VP9_PNAME, true) : true;
         VP9_RTX_PT = cfg != null ? cfg.getInt(VP9_RTX_PT_PNAME, 97) : 97;
         H264_PT = cfg != null ? cfg.getInt(H264_PT_PNAME, 107) : 107;
+        ENABLE_H264 = cfg != null ? cfg.getBoolean(ENABLE_H264_PNAME, true) : true;
         H264_RTX_PT = cfg != null ? cfg.getInt(H264_RTX_PT_PNAME, 99) : 99;
         enableFrameMarking
             = cfg != null && cfg.getBoolean(ENABLE_FRAMEMARKING_PNAME, false);
@@ -211,7 +251,7 @@ public class JingleOfferFactory
     {
         ContentPacketExtension content
             = createContentPacketExtension(
-                    MediaType.AUDIO, disableIce, useDtls);
+                    "audio", disableIce, useDtls);
 
         addAudioToContent(content, stereo, enableRemb, enableTcc);
 
@@ -235,7 +275,7 @@ public class JingleOfferFactory
     {
         ContentPacketExtension content
             = createContentPacketExtension(
-                    MediaType.DATA, disableIce, useDtls);
+                    "data", disableIce, useDtls);
 
         addDataToContent(content);
 
@@ -266,7 +306,7 @@ public class JingleOfferFactory
     {
         ContentPacketExtension videoContentPe
             = createContentPacketExtension(
-                    MediaType.VIDEO, disableIce, useDtls);
+                    "video", disableIce, useDtls);
 
         addVideoToContent(videoContentPe, useRtx, enableRemb, enableTcc,
                 minBitrate, startBitrate);
@@ -279,7 +319,7 @@ public class JingleOfferFactory
      * the media and basic transport information based on given parameters.
      * The creator attribute is set to "initiator" and "senders" to "both".
      *
-     * @param mediaType the <tt>MediaType</tt> for the content
+     * @param name the Jingle name for the content
      * @param disableIce <tt>true</tt> if ICE transport should be disabled
      * @param useDtls <tt>true</tt> if DTLS should be used on top of ICE
      * transport(will have effect only if <tt>disableIce</tt></tt> is
@@ -288,12 +328,12 @@ public class JingleOfferFactory
      * @return new, parametrized instance of <tt>ContentPacketExtension</tt>.
      */
     private static ContentPacketExtension createContentPacketExtension(
-            MediaType mediaType, boolean disableIce, boolean useDtls)
+            String name, boolean disableIce, boolean useDtls)
     {
         ContentPacketExtension content
             = new ContentPacketExtension(
                     ContentPacketExtension.CreatorEnum.initiator,
-                    mediaType.name().toLowerCase());
+                    name);
 
         content.setSenders(ContentPacketExtension.SendersEnum.both);
 
@@ -382,160 +422,96 @@ public class JingleOfferFactory
             rtpDesc.addExtmap(rtpStreamId);
         }
 
-        // a=rtpmap:100 VP8/90000
-        PayloadTypePacketExtension vp8
-            = addPayloadTypeExtension(rtpDesc, VP8_PT, Constants.VP8, 90000);
-
-        // a=rtcp-fb:100 ccm fir
-        vp8.addRtcpFeedbackType(createRtcpFbPacketExtension("ccm", "fir"));
-
-        // a=rtcp-fb:100 nack
-        vp8.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", null));
-
-        // a=rtcp-fb:100 nack pli
-        vp8.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", "pli"));
-
-
-        if (minBitrate != -1)
+        if (ENABLE_VP8 && VP8_PT > 0)
         {
+            // a=rtpmap:XXX VP8/90000
+            PayloadTypePacketExtension vp8
+                    = addPayloadTypeExtension(rtpDesc, VP8_PT, Constants.VP8, 90000);
+
+            addExtensionsToVideoPayloadType(
+                    vp8, minBitrate, startBitrate, enableRemb, enableTcc);
+        }
+
+        if (ENABLE_H264 && H264_PT > 0)
+        {
+            // a=rtpmap:XXX H264/90000
+            PayloadTypePacketExtension h264 = addPayloadTypeExtension(
+                    // XXX(gp): older Chrome versions (users have reported 53/55/61)
+                    // fail to enable h264, if the encoding name is in lower case.
+                    rtpDesc, H264_PT, Constants.H264.toUpperCase(), 90000);
+
+            addExtensionsToVideoPayloadType(
+                    h264, minBitrate, startBitrate, enableRemb, enableTcc);
             addParameterExtension(
-                vp8, "x-google-min-bitrate", String.valueOf(minBitrate));
+                h264,
+                "profile-level-id",
+                "42e01f;level-asymmetry-allowed=1;packetization-mode=1;");
         }
 
-        if (startBitrate != -1)
+        if (ENABLE_VP9 && VP9_PT > 0)
         {
-            addParameterExtension(
-                vp8, "x-google-start-bitrate", String.valueOf(startBitrate));
+            // a=rtpmap:XXX VP9/90000
+            PayloadTypePacketExtension vp9
+                    = addPayloadTypeExtension(rtpDesc, VP9_PT, Constants.VP9, 90000);
+
+            addExtensionsToVideoPayloadType(
+                    vp9, minBitrate, startBitrate, enableRemb, enableTcc);
         }
 
-        // a=rtpmap:107 H264/90000
-        PayloadTypePacketExtension h264 = addPayloadTypeExtension(
-                // XXX(gp): older Chrome versions (users have reported 53/55/61)
-                // fail to enable h264, if the encoding name is in lower case.
-                rtpDesc, H264_PT, Constants.H264.toUpperCase(), 90000);
-
-        // a=rtcp-fb:107 ccm fir
-        h264.addRtcpFeedbackType(createRtcpFbPacketExtension("ccm", "fir"));
-
-        // a=rtcp-fb:107 nack
-        h264.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", null));
-
-        // a=rtcp-fb:107 nack pli
-        h264.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", "pli"));
-
-        if (minBitrate != -1)
-        {
-            addParameterExtension(
-                h264, "x-google-min-bitrate", String.valueOf(minBitrate));
-        }
-
-        if (startBitrate != -1)
-        {
-            addParameterExtension(
-                h264, "x-google-start-bitrate", String.valueOf(startBitrate));
-        }
-
-        addParameterExtension(
-            h264,
-            "profile-level-id",
-            "42e01f;level-asymmetry-allowed=1;packetization-mode=1;");
-
-        // a=rtpmap:101 VP9/90000
-        PayloadTypePacketExtension vp9
-            = addPayloadTypeExtension(rtpDesc, VP9_PT, Constants.VP9, 90000);
-
-        // a=rtcp-fb:101 ccm fir
-        vp9.addRtcpFeedbackType(createRtcpFbPacketExtension("ccm", "fir"));
-
-        // a=rtcp-fb:101 nack
-        vp9.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", null));
-
-        // a=rtcp-fb:101 nack pli
-        vp9.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", "pli"));
-
-        if (enableRemb)
-        {
-            // a=rtcp-fb:100 goog-remb
-            vp8.addRtcpFeedbackType(
-                createRtcpFbPacketExtension("goog-remb", null));
-
-            // a=rtcp-fb:107 goog-remb
-            h264.addRtcpFeedbackType(
-                createRtcpFbPacketExtension("goog-remb", null));
-
-            // a=rtcp-fb:101 goog-remb
-            vp9.addRtcpFeedbackType(
-                createRtcpFbPacketExtension("goog-remb", null));
-        }
 
         if (enableTcc)
         {
             // a=extmap:5 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
-            RTPHdrExtPacketExtension tcc
-                = new RTPHdrExtPacketExtension();
-            tcc.setID("5");
+            RTPHdrExtPacketExtension tcc = new RTPHdrExtPacketExtension();
+            tcc.setID(TRANSPORT_CC_ID);
             tcc.setURI(URI.create(RTPExtension.TRANSPORT_CC_URN));
             rtpDesc.addExtmap(tcc);
-
-            // a=rtcp-fb:100 transport-cc
-            vp8.addRtcpFeedbackType(
-                createRtcpFbPacketExtension("transport-cc", null));
-
-            // a=rtcp-fb:107 transport-cc
-            h264.addRtcpFeedbackType(
-                createRtcpFbPacketExtension("transport-cc", null));
-
-            // a=rtcp-fb:101 transport-cc
-            vp9.addRtcpFeedbackType(
-                createRtcpFbPacketExtension("transport-cc", null));
         }
 
-        if (minBitrate != -1)
-        {
-            addParameterExtension(
-                vp9, "x-google-min-bitrate", String.valueOf(minBitrate));
-        }
-
-        if (startBitrate != -1)
-        {
-            addParameterExtension(
-                vp9, "x-google-start-bitrate", String.valueOf(startBitrate));
-        }
 
         if (useRtx)
         {
-            // a=rtpmap:96 rtx/90000
-            PayloadTypePacketExtension rtx = addPayloadTypeExtension(
-                rtpDesc, VP8_RTX_PT, Constants.RTX, 90000);
+            if (ENABLE_VP8 && VP8_RTX_PT > 0 && VP8_PT > 0)
+            {
+                // a=rtpmap:96 rtx/90000
+                PayloadTypePacketExtension rtx = addPayloadTypeExtension(
+                        rtpDesc, VP8_RTX_PT, Constants.RTX, 90000);
 
-            // a=fmtp:96 apt=100
-            addParameterExtension(rtx, "apt", String.valueOf(VP8_PT));
+                // a=fmtp:96 apt=100
+                addParameterExtension(rtx, "apt", String.valueOf(VP8_PT));
 
-            // Chrome doesn't have these when it creates an offer, but they were
-            // observed in a hangouts conference. Not sure whether they have any
-            // effect.
-            // a=rtcp-fb:96 ccm fir
-            rtx.addRtcpFeedbackType(createRtcpFbPacketExtension("ccm", "fir"));
+                // Chrome doesn't have these when it creates an offer, but they were
+                // observed in a hangouts conference. Not sure whether they have any
+                // effect.
+                // a=rtcp-fb:96 ccm fir
+                rtx.addRtcpFeedbackType(createRtcpFbPacketExtension("ccm", "fir"));
 
-            // a=rtcp-fb:96 nack
-            rtx.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", null));
+                // a=rtcp-fb:96 nack
+                rtx.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", null));
 
-            // a=rtcp-fb:96 nack pli
-            rtx.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", "pli"));
+                // a=rtcp-fb:96 nack pli
+                rtx.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", "pli"));
+            }
 
-            // a=rtpmap:99 rtx/90000
-            PayloadTypePacketExtension rtxH264 = addPayloadTypeExtension(
-                rtpDesc, H264_RTX_PT, Constants.RTX, 90000);
+            if (ENABLE_VP9 && VP9_RTX_PT > 0 && VP9_PT > 0)
+            {
+                // a=rtpmap:97 rtx/90000
+                PayloadTypePacketExtension rtxVP9 = addPayloadTypeExtension(
+                        rtpDesc, VP9_RTX_PT, Constants.RTX, 90000);
 
-            // a=fmtp:99 apt=107
-            addParameterExtension(rtxH264, "apt", String.valueOf(H264_PT));
+                // a=fmtp:97 apt=101
+                addParameterExtension(rtxVP9, "apt", String.valueOf(VP9_PT));
+            }
 
-            // a=rtpmap:97 rtx/90000
-            PayloadTypePacketExtension rtxVP9 = addPayloadTypeExtension(
-                rtpDesc, VP9_RTX_PT, Constants.RTX, 90000);
+            if (ENABLE_H264 && H264_RTX_PT > 0 && H264_PT > 0)
+            {
+                // a=rtpmap:99 rtx/90000
+                PayloadTypePacketExtension rtxH264 = addPayloadTypeExtension(
+                        rtpDesc, H264_RTX_PT, Constants.RTX, 90000);
 
-            // a=fmtp:97 apt=101
-            addParameterExtension(rtxVP9, "apt", String.valueOf(VP9_PT));
+                // a=fmtp:99 apt=107
+                addParameterExtension(rtxH264, "apt", String.valueOf(H264_PT));
+            }
         }
 
         // a=rtpmap:116 red/90000
@@ -557,7 +533,8 @@ public class JingleOfferFactory
      */
     private static ParameterPacketExtension addParameterExtension(
         PayloadTypePacketExtension ptExt,
-                                              String name, String value)
+        String name,
+        String value)
     {
         ParameterPacketExtension parameterPacketExtension
             = new ParameterPacketExtension();
@@ -566,6 +543,51 @@ public class JingleOfferFactory
         ptExt.addParameter(parameterPacketExtension);
 
         return parameterPacketExtension;
+    }
+
+    private static void addExtensionsToVideoPayloadType(
+            PayloadTypePacketExtension pt,
+            int minBitrate,
+            int startBitrate,
+            boolean enableRemb,
+            boolean enableTcc)
+    {
+        // a=rtcp-fb:XXX ccm fir
+        pt.addRtcpFeedbackType(createRtcpFbPacketExtension("ccm", "fir"));
+
+        // a=rtcp-fb:XXX nack
+        pt.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", null));
+
+        // a=rtcp-fb:XXX nack pli
+        pt.addRtcpFeedbackType(createRtcpFbPacketExtension("nack", "pli"));
+
+
+        if (minBitrate != -1)
+        {
+            addParameterExtension(
+                    pt, "x-google-min-bitrate", String.valueOf(minBitrate));
+        }
+
+        if (startBitrate != -1)
+        {
+            addParameterExtension(
+                    pt, "x-google-start-bitrate", String.valueOf(startBitrate));
+        }
+
+        if (enableRemb)
+        {
+            // a=rtcp-fb:XXX goog-remb
+            pt.addRtcpFeedbackType(
+                    createRtcpFbPacketExtension("goog-remb", null));
+        }
+
+        if (enableTcc)
+        {
+            // a=rtcp-fb:XXX transport-cc
+            pt.addRtcpFeedbackType(
+                    createRtcpFbPacketExtension("transport-cc", null));
+        }
+
     }
 
     /**
@@ -598,8 +620,10 @@ public class JingleOfferFactory
      * @return the added {@link PayloadTypePacketExtension}.
      */
     private static PayloadTypePacketExtension addPayloadTypeExtension(
-        RtpDescriptionPacketExtension rtpDesc, int id, String name,
-        int clockRate)
+            RtpDescriptionPacketExtension rtpDesc,
+            int id,
+            String name,
+            int clockRate)
     {
         PayloadTypePacketExtension payloadTypePacketExtension
             = new PayloadTypePacketExtension();
@@ -615,11 +639,15 @@ public class JingleOfferFactory
      * Adds the video-related extensions for an offer to a
      * {@link ContentPacketExtension}.
      * @param content the {@link ContentPacketExtension} to add extensions to.
-     * @param stereo enable transport-cc
-     * @param enableTcc enable opus stereo mode
+     * @param stereo Whether to enable stereo for opus.
+     * @param enableRemb Whether to enable REMB.
+     * @param enableTcc Whether to enable transport-cc.
      */
-    private static void addAudioToContent(ContentPacketExtension content,
-                                          boolean stereo, boolean enableRemb, boolean enableTcc)
+    private static void addAudioToContent(
+            ContentPacketExtension content,
+            boolean stereo,
+            boolean enableRemb,
+            boolean enableTcc)
     {
         RtpDescriptionPacketExtension rtpDesc
             = new RtpDescriptionPacketExtension();
@@ -651,6 +679,12 @@ public class JingleOfferFactory
 
         if (enableTcc)
         {
+            // a=extmap:5 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01
+            RTPHdrExtPacketExtension tcc = new RTPHdrExtPacketExtension();
+            tcc.setID(TRANSPORT_CC_ID);
+            tcc.setURI(URI.create(RTPExtension.TRANSPORT_CC_URN));
+            rtpDesc.addExtmap(tcc);
+
             // a=rtcp-fb:111 transport-cc
             opus.addRtcpFeedbackType(
                 createRtcpFbPacketExtension("transport-cc", null));
@@ -688,24 +722,5 @@ public class JingleOfferFactory
         rdpe.setMedia("application");
 
         content.addChildExtension(rdpe);
-    }
-
-    /**
-     * Check if given offer contains video contents.
-     * @param contents the list of <tt>ContentPacketExtension</tt> describing
-     *        Jingle offer.
-     * @return <tt>true</tt> if given offer has video content.
-     */
-    public static boolean containsVideoContent(
-        List<ContentPacketExtension> contents)
-    {
-        for (ContentPacketExtension content : contents)
-        {
-            if (content.getName().equalsIgnoreCase("video"))
-            {
-                return true;
-            }
-        }
-        return false;
     }
 }

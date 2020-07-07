@@ -17,7 +17,7 @@
  */
 package org.jitsi.jicofo.xmpp;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.*;
+import org.jitsi.xmpp.extensions.jibri.*;
 
 import org.jitsi.xmpp.util.*;
 
@@ -48,6 +48,7 @@ public class JibriIqProviderTest
             "<iq to='t' from='f' type='set'>" +
                 "<jibri xmlns='http://jitsi.org/protocol/jibri'" +
                 "   status='off' action='stop' failure_reason='error'" +
+                "   should_retry='true'" +
                 "   session_id='abcd'" +
                 "/>" +
 
@@ -60,6 +61,7 @@ public class JibriIqProviderTest
         assertEquals(JibriIq.Status.OFF, jibriIq.getStatus());
         assertEquals(JibriIq.Action.STOP, jibriIq.getAction());
         assertEquals(JibriIq.FailureReason.ERROR, jibriIq.getFailureReason());
+        assertEquals(true, jibriIq.getShouldRetry());
         assertTrue(jibriIq.getSessionId().equalsIgnoreCase("abcd"));
 
         assertNull(jibriIq.getError());

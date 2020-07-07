@@ -21,10 +21,10 @@ import net.java.sip.communicator.impl.protocol.jabber.*;
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.service.protocol.Message;
 import net.java.sip.communicator.service.protocol.event.*;
-import net.java.sip.communicator.util.Logger;
 
 import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.*;
+import org.jitsi.utils.logging.*;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.*;
@@ -325,7 +325,7 @@ public class ChatRoomImpl
     public void leave()
     {
         XMPPConnection connection = opSet.getConnection();
-        if (connection != null && connection.isConnected())
+        if (connection != null)
         {
             try
             {
@@ -336,7 +336,14 @@ public class ChatRoomImpl
             }
             catch (NotConnectedException | InterruptedException e)
             {
-                logger.error("Failed to properly leave " + muc.toString(), e);
+                // when the connection is not connected and
+                // we get NotConnectedException, this is expected (skip log)
+                if (connection.isConnected()
+                    || e instanceof InterruptedException)
+                {
+                    logger.error(
+                        "Failed to properly leave " + muc.toString(), e);
+                }
             }
             finally
             {
@@ -870,7 +877,9 @@ public class ChatRoomImpl
     {
         try
         {
-            muc.destroy(reason, JidCreate.entityBareFrom(alternateAddress));
+            muc.destroy(reason,
+                alternateAddress != null ?
+                    JidCreate.entityBareFrom(alternateAddress) : null);
         }
         catch (XMPPException
                 | XmppStringprepException
@@ -996,6 +1005,9 @@ public class ChatRoomImpl
             return;
         }
 
+        // Reset the stanza ID before sending
+        lastPresenceSent.setStanzaId(null);
+
         connection.sendStanza(lastPresenceSent);
     }
 
@@ -1042,6 +1054,9 @@ public class ChatRoomImpl
             logger.error("Failed to send presence extension - no connection");
             return;
         }
+
+        // Reset the stanza ID before sending
+        lastPresenceSent.setStanzaId(null);
 
         connection.sendStanza(lastPresenceSent);
     }
@@ -1152,10 +1167,13 @@ public class ChatRoomImpl
             return;
         }
 
+        ChatMemberImpl chatMember;
+        boolean memberJoined = false;
+        boolean memberLeft = false;
+
         synchronized (members)
         {
-            ChatMemberImpl chatMember = (ChatMemberImpl) findChatMember(jid);
-            boolean memberIsNew = false;
+            chatMember = (ChatMemberImpl) findChatMember(jid);
             if (chatMember == null)
             {
                 if (presence.getType().equals(Presence.Type.available))
@@ -1167,30 +1185,41 @@ public class ChatRoomImpl
                         logger.debug("Joined " + jid + " room: " + roomJid);
                     }
                     chatMember = addMember(jid);
-                    memberIsNew = true;
+                    memberJoined = true;
                 }
                 else
                 {
-                    // It is not clear to me whether the first presence from
-                    // a member necessarily needs to have type "available", but
-                    // this has worked so far and I don't want to change it.
-
                     // We received presence from an unknown member which doesn't
                     // look like a new member's presence. Ignore it.
+                    // The member might have been just removed via left(), which
+                    // is fine.
                     return;
                 }
             }
-
-            if (chatMember != null)
+            else if (presence.getType().equals(Presence.Type.unavailable))
             {
-                chatMember.processPresence(presence);
+                memberLeft = true;
+            }
+        }
 
-                if (memberIsNew)
-                {
-                    // Trigger member "joined"
-                    notifyMemberJoined(chatMember);
-                }
+        if (chatMember != null)
+        {
+            chatMember.processPresence(presence);
 
+            if (memberJoined)
+            {
+                // Trigger member "joined"
+                notifyMemberJoined(chatMember);
+            }
+            else if (memberLeft)
+            {
+                // In some cases smack fails to call left(). We'll call it here
+                // any time we receive presence unavailable
+                memberListener.left(jid);
+            }
+
+            if (!memberLeft)
+            {
                 notifyMemberPropertyChanged(chatMember);
             }
         }
@@ -1273,9 +1302,15 @@ public class ChatRoomImpl
             }
         }
 
+        /**
+         * This needs to be prepared to run twice for the same member.
+         * @param occupantJid
+         */
         @Override
         public void left(EntityFullJid occupantJid)
         {
+            ChatMemberImpl member;
+
             synchronized (members)
             {
                 if (logger.isDebugEnabled())
@@ -1283,44 +1318,46 @@ public class ChatRoomImpl
                     logger.debug("Left " + occupantJid + " room: " + roomJid);
                 }
 
-                ChatMemberImpl member = removeMember(occupantJid);
+                member = removeMember(occupantJid);
+            }
 
-                if (member != null)
-                {
-                    notifyMemberLeft(member);
-                }
-                else
-                {
-                    logger.warn(
-                        "Member left event for non-existing member: "
-                                    + occupantJid);
-                }
+            if (member != null)
+            {
+                notifyMemberLeft(member);
+            }
+            else
+            {
+                logger.info(
+                    "Member left event for non-existing member: "
+                                + occupantJid);
             }
         }
 
         @Override
         public void kicked(EntityFullJid occupantJid, Jid actor, String reason)
         {
+            ChatMemberImpl member;
+
             synchronized (members)
             {
                 if (logger.isDebugEnabled())
                 {
                     logger.debug(
                         "Kicked: " + occupantJid + ", "
-                                + actor + ", " + reason);
+                            + actor + ", " + reason);
                 }
 
-                ChatMemberImpl member = removeMember(occupantJid);
-
-                if (member == null)
-                {
-                    logger.error(
-                        "Kicked member does not exist: " + occupantJid);
-                    return;
-                }
-
-                notifyMemberKicked(member);
+                member = removeMember(occupantJid);
             }
+
+            if (member == null)
+            {
+                logger.error(
+                    "Kicked member does not exist: " + occupantJid);
+                return;
+            }
+
+            notifyMemberKicked(member);
         }
 
         @Override

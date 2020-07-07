@@ -36,15 +36,6 @@ public class JicofoBundleConfig
     private boolean useMockProtocols = false;
 
     /**
-     * Indicates whether mock protocol providers should be used instead of
-     * original Jitsi protocol providers.
-     */
-    public boolean isUseMockProtocols()
-    {
-        return useMockProtocols;
-    }
-
-    /**
      * Make OSGi use mock protocol providers instead of original Jitsi protocols
      * implementation.
      *
@@ -80,49 +71,20 @@ public class JicofoBundleConfig
                 "org/jitsi/service/libjitsi/LibJitsiActivator"
             },
             {
-                "net/java/sip/communicator/util/UtilActivator",
                 "org/jitsi/eventadmin/Activator",
-                //"net/java/sip/communicator/impl/fileaccess/FileAccessActivator"
             },
             {
                 "net/java/sip/communicator/impl/configuration/ConfigurationActivator"
             },
             {
-                //"net/java/sip/communicator/impl/resources/ResourceManagementActivator"
-            },
-            {
-                //"net/java/sip/communicator/impl/dns/DnsUtilActivator"
-            },
-            {
+                // We need this because ProtocolProviderFactory uses it
                 "net/java/sip/communicator/impl/credentialsstorage/CredentialsStorageActivator"
             },
             {
                 "net/java/sip/communicator/impl/netaddr/NetaddrActivator"
             },
             {
-                //"net/java/sip/communicator/impl/packetlogging/PacketLoggingActivator"
-            },
-            {
-                //"net/java/sip/communicator/service/gui/internal/GuiServiceActivator"
-            },
-            {
                 "net/java/sip/communicator/service/protocol/media/ProtocolMediaActivator"
-            },
-            {
-                //"net/java/sip/communicator/service/notification/NotificationServiceActivator",
-                //"net/java/sip/communicator/impl/globaldisplaydetails/GlobalDisplayDetailsActivator"
-            },
-            useMockProtocols
-                ? new String[]
-                {
-                    "mock/media/MockMediaActivator"
-                }
-                : new String[]
-                {
-                    //"net/java/sip/communicator/impl/neomedia/NeomediaActivator"
-                },
-            {
-                //"net/java/sip/communicator/impl/certificate/CertificateVerificationActivator"
             },
             {
                 "org/jitsi/jicofo/version/VersionActivator"
@@ -138,8 +100,12 @@ public class JicofoBundleConfig
                 "org/jitsi/jicofo/auth/AuthBundleActivator"
             },
             {
-                "org/jitsi/jicofo/JvbDoctor",
+                "org/jitsi/jicofo/bridge/JvbDoctor",
+                "org/jitsi/jicofo/recording/jibri/JibriStats",
                 "org/jitsi/jicofo/VersionBroadcaster"
+            },
+            {
+                "org/jitsi/jicofo/health/Health"
             }
         };
 

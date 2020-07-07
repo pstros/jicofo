@@ -17,9 +17,8 @@
  */
 package org.jitsi.protocol.xmpp.util;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jitsimeet.*;
-import org.jitsi.impl.protocol.xmpp.extensions.*;
+import org.jitsi.xmpp.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 
 /**
  * Jicofo specific utilities for Jingle.
@@ -29,11 +28,8 @@ import org.jitsi.impl.protocol.xmpp.extensions.*;
 public class JicofoJingleUtils
 {
     /**
-     * Adds a group packet extension to a {@link JingleIQ}, and a
-     * {@link BundlePacketExtension} to each of its contents. I.e. adds
-     * everything that we deem necessary to enable {@code bundle} in an offer.
-     * It is unclear how much of this is actually necessary for
-     * {@code jitsi-meet}.
+     * Adds a group packet extension to a {@link JingleIQ} which is
+     * necessary to enable {@code bundle} in an offer.
      *
      * @param jingleIQ the IQ to add extensions to.
      */
@@ -43,13 +39,6 @@ public class JicofoJingleUtils
             = GroupPacketExtension.createBundleGroup(jingleIQ.getContentList());
 
         jingleIQ.addExtension(group);
-
-        for (ContentPacketExtension content : jingleIQ.getContentList())
-        {
-            // FIXME: is it mandatory ?
-            // http://estos.de/ns/bundle
-            content.addChildExtension(new BundlePacketExtension());
-        }
     }
 
     /**

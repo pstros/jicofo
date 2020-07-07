@@ -17,11 +17,10 @@
  */
 package org.jitsi.jicofo.discovery;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.health.*;
 import net.java.sip.communicator.service.protocol.*;
-import net.java.sip.communicator.util.*;
 
 import org.jitsi.protocol.xmpp.*;
+import org.jitsi.utils.logging.*;
 import org.jitsi.xmpp.util.*;
 
 import org.jivesoftware.smack.packet.*;
@@ -39,7 +38,7 @@ public class DiscoveryUtil
     /**
      * The logger
      */
-    private final static Logger logger 
+    private final static Logger logger
         = Logger.getLogger(DiscoveryUtil.class);
 
     /**
@@ -48,25 +47,25 @@ public class DiscoveryUtil
     private static ArrayList<String> defaultFeatures;
 
     /**
-     * Audio RTP feature name.  
+     * Audio RTP feature name.
      */
     public final static String FEATURE_AUDIO
             = "urn:xmpp:jingle:apps:rtp:audio";
 
     /**
-     * Video RTP feature name.  
+     * Video RTP feature name.
      */
     public final static String FEATURE_VIDEO
             = "urn:xmpp:jingle:apps:rtp:video";
 
     /**
-     * ICE feature name.  
+     * ICE feature name.
      */
     public final static String FEATURE_ICE
             = "urn:xmpp:jingle:transports:ice-udp:1";
 
     /**
-     * DTLS/SCTP feature name.  
+     * DTLS/SCTP feature name.
      */
     public final static String FEATURE_SCTP
             = "urn:xmpp:jingle:transports:dtls-sctp:1";
@@ -83,19 +82,14 @@ public class DiscoveryUtil
     public final static String FEATURE_DTLS = "urn:xmpp:jingle:apps:dtls:0";
 
     /**
-     * RTCP mux feature name.  
+     * RTCP mux feature name.
      */
     public final static String FEATURE_RTCP_MUX = "urn:ietf:rfc:5761";
 
     /**
-     * RTP bundle feature name. 
+     * RTP bundle feature name.
      */
     public final static String FEATURE_RTP_BUNDLE = "urn:ietf:rfc:5888";
-
-    /**
-     * Heath checks feature namespace.
-     */
-    public final static String FEATURE_HEALTH_CHECK = HealthCheckIQ.NAMESPACE;
 
     /**
      * A namespace for our custom "lip-sync" feature. Advertised by the clients
@@ -106,6 +100,19 @@ public class DiscoveryUtil
         = "http://jitsi.org/meet/lipsync";
 
     /**
+     * A namespace for detecting participants as jigasi users.
+     */
+    public final static String FEATURE_JIGASI
+        = "http://jitsi.org/protocol/jigasi";
+
+    /**
+     * A namespace for detecting whether a participant (jigasi users) can be
+     * muted.
+     */
+    public final static String FEATURE_AUDIO_MUTE
+        = "http://jitsi.org/protocol/audio-mute";
+
+    /**
      * Array constant which can be used to check for Version IQ support.
      */
     public final static String[] VERSION_FEATURES = new String[]
@@ -114,7 +121,7 @@ public class DiscoveryUtil
         };
 
     /**
-     * Gets the list of features supported by participant. If we fail to 
+     * Gets the list of features supported by participant. If we fail to
      * obtain it due to network failure default feature list is returned.
      * @param protocolProvider protocol provider service instance that will
      *        be used for discovery.
@@ -123,7 +130,7 @@ public class DiscoveryUtil
     public static List<String> discoverParticipantFeatures
         (ProtocolProviderService protocolProvider, EntityFullJid address)
     {
-        OperationSetSimpleCaps disco 
+        OperationSetSimpleCaps disco
             = protocolProvider.getOperationSet(OperationSetSimpleCaps.class);
         if (disco == null)
         {
@@ -131,25 +138,41 @@ public class DiscoveryUtil
                 "Service discovery not supported by " + protocolProvider);
             return getDefaultParticipantFeatureSet();
         }
-        
+
+        long start = System.currentTimeMillis();
+
+        logger.info("Doing feature discovery for " + address);
+
         // Discover participant feature set
         List<String> participantFeatures = disco.getFeatures(address);
         if (participantFeatures == null)
         {
-            logger.error(
-                "Failed to discover features for "+ address 
+            logger.warn(
+                "Failed to discover features for "+ address
                         + " assuming default feature set.");
-            
+
             return getDefaultParticipantFeatureSet();
         }
+
+        long tookMillis = System.currentTimeMillis() - start;
 
         if (logger.isDebugEnabled())
         {
             StringBuilder sb
                 = new StringBuilder(address)
-                .append(", features: ")
-                .append(String.join(", ", participantFeatures));
+                    .append(", features: ")
+                    .append(String.join(", ", participantFeatures))
+                    .append(", in: ")
+                    .append(tookMillis);
             logger.debug(sb);
+        }
+        else
+        {
+            logger.info(
+                String.format(
+                    "Successfully discovered features for %s in %d",
+                    address,
+                    tookMillis));
         }
 
         return participantFeatures;

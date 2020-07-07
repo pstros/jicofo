@@ -17,17 +17,18 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jitsimeet.*;
-import net.java.sip.communicator.impl.protocol.jabber.jinglesdp.*;
 import net.java.sip.communicator.service.protocol.*;
-import org.jitsi.impl.protocol.xmpp.extensions.*;
+import org.jitsi.protocol.xmpp.colibri.exception.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.jingle.JingleUtils;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import org.jitsi.jicofo.discovery.*;
 import org.jitsi.jicofo.util.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.util.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.*;
+import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
@@ -82,6 +83,7 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
      */
     @Override
     protected List<ContentPacketExtension> createOffer()
+        throws UnsupportedFeatureConfigurationException
     {
         EntityFullJid address = participant.getMucJid();
 
@@ -89,7 +91,6 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
         List<String> features = DiscoveryUtil.discoverParticipantFeatures(
             meetConference.getXmppProvider(), address);
         participant.setSupportedFeatures(features);
-
 
         List<ContentPacketExtension> contents = new ArrayList<>();
 
@@ -140,10 +141,9 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
     @Override
     protected ColibriConferenceIQ doAllocateChannels(
         List<ContentPacketExtension> offer)
-        throws OperationFailedException
+        throws ColibriException
     {
         return bridgeSession.colibriConference.createColibriChannels(
-            participant.hasBundleSupport(),
             participant.getEndpointId(),
             participant.getStatId(),
             true /* initiator */,
@@ -248,27 +248,26 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
             jingleIQ = jingle.createTransportReplace(jingleSession, contents);
         }
 
-        if (participant.hasBundleSupport())
-        {
-            JicofoJingleUtils.addBundleExtensions(jingleIQ);
-        }
+        JicofoJingleUtils.addBundleExtensions(jingleIQ);
         if (startMuted[0] || startMuted[1])
         {
             JicofoJingleUtils.addStartMutedExtension(
                 jingleIQ, startMuted[0], startMuted[1]);
         }
-        String serverRegion = bridgeSession.bridge.getRegion();
-        if (serverRegion != null)
-        {
-            jingleIQ.addExtension(new ServerRegionPacketExtension(serverRegion));
-        }
+
+        // Include info about the BridgeSession which provides the transport
+        jingleIQ.addExtension(
+            new BridgeSessionPacketExtension(
+                    bridgeSession.id, bridgeSession.bridge.getRegion()));
 
         if (initiateSession)
         {
+            logger.info("Sending session-initiate to: " + address);
             ack = jingle.initiateSession(jingleIQ, meetConference);
         }
         else
         {
+            logger.info("Sending transport-replace to: " + address);
             // will throw OperationFailedExc if XMPP connection is broken
             ack = jingle.replaceTransport(jingleIQ, jingleSession);
         }
@@ -294,8 +293,6 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
             List<ContentPacketExtension> offer,
             ColibriConferenceIQ colibriChannels)
     {
-        boolean useBundle = participant.hasBundleSupport();
-
         MediaSourceMap conferenceSSRCs
             = meetConference.getAllSources(reInvite ? participant : null);
 
@@ -315,32 +312,23 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
             for (ColibriConferenceIQ.Channel channel
                     : colibriContent.getChannels())
             {
-                IceUdpTransportPacketExtension transport;
+                ColibriConferenceIQ.ChannelBundle bundle
+                    = colibriChannels.getChannelBundle(
+                    channel.getChannelBundleId());
 
-                if (useBundle)
+                if (bundle == null)
                 {
-                    ColibriConferenceIQ.ChannelBundle bundle
-                        = colibriChannels.getChannelBundle(
-                                channel.getChannelBundleId());
-
-                    if (bundle == null)
-                    {
-                        logger.error(
-                            "No bundle for " + channel.getChannelBundleId());
-                        continue;
-                    }
-
-                    transport = bundle.getTransport();
-
-                    if (!transport.isRtcpMux())
-                    {
-                        transport.addChildExtension(
-                                new RtcpmuxPacketExtension());
-                    }
+                    logger.error(
+                        "No bundle for " + channel.getChannelBundleId());
+                    continue;
                 }
-                else
+
+                IceUdpTransportPacketExtension transport = bundle.getTransport();
+
+                if (!transport.isRtcpMux())
                 {
-                    transport = channel.getTransport();
+                    transport.addChildExtension(
+                            new RtcpmuxPacketExtension());
                 }
 
                 try
@@ -364,27 +352,18 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
             for (ColibriConferenceIQ.SctpConnection sctpConn
                     : colibriContent.getSctpConnections())
             {
-                IceUdpTransportPacketExtension transport;
+                ColibriConferenceIQ.ChannelBundle bundle
+                    = colibriChannels.getChannelBundle(
+                            sctpConn.getChannelBundleId());
 
-                if (useBundle)
+                if (bundle == null)
                 {
-                    ColibriConferenceIQ.ChannelBundle bundle
-                        = colibriChannels.getChannelBundle(
-                                sctpConn.getChannelBundleId());
-
-                    if (bundle == null)
-                    {
-                        logger.error(
-                            "No bundle for " + sctpConn.getChannelBundleId());
-                        continue;
-                    }
-
-                    transport = bundle.getTransport();
+                    logger.error(
+                        "No bundle for " + sctpConn.getChannelBundleId());
+                    continue;
                 }
-                else
-                {
-                    transport = sctpConn.getTransport();
-                }
+
+                IceUdpTransportPacketExtension transport = bundle.getTransport();
 
                 try
                 {
@@ -419,12 +398,9 @@ public class ParticipantChannelAllocator extends AbstractChannelAllocator
                 = JingleUtils.getRtpDescription(cpe);
             if (rtpDescPe != null)
             {
-                if (useBundle)
-                {
-                    // rtcp-mux
-                    rtpDescPe.addChildExtension(
-                            new RtcpmuxPacketExtension());
-                }
+                // rtcp-mux is always used
+                rtpDescPe.addChildExtension(
+                        new RtcpmuxPacketExtension());
 
                 // Copy SSRC sent from the bridge(only the first one)
                 for (ColibriConferenceIQ.Channel channel

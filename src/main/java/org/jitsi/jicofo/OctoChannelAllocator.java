@@ -17,11 +17,12 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.protocol.xmpp.colibri.exception.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import net.java.sip.communicator.service.protocol.*;
 import org.jitsi.jicofo.util.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
 
 import java.util.*;
 
@@ -114,12 +115,11 @@ public class OctoChannelAllocator extends AbstractChannelAllocator
     @Override
     protected ColibriConferenceIQ doAllocateChannels(
         List<ContentPacketExtension> offer)
-        throws OperationFailedException
+        throws ColibriException
     {
         // This is a blocking call.
         ColibriConferenceIQ result =
             bridgeSession.colibriConference.createColibriChannels(
-                true /* bundle */,
                 null /* endpoint */,
                 null /* statsId */,
                 false/* initiator */,
@@ -136,7 +136,13 @@ public class OctoChannelAllocator extends AbstractChannelAllocator
             participant.setColibriChannelsInfo(result);
 
             // Check if the sources of the participant need an update.
-            boolean update = participant.updateSources();
+            boolean update = false;
+
+            if (participant.updateSources())
+            {
+                update = true;
+                logger.info("Will update the sources of the Octo participant " + this);
+            }
 
             // Check if the relays need an update. We always use the same set
             // of relays for the audio and video channels, so just check video.
@@ -158,12 +164,9 @@ public class OctoChannelAllocator extends AbstractChannelAllocator
                 {
                     update = true;
 
-                    if (logger.isDebugEnabled())
-                    {
-                        logger.debug(
+                    logger.info(
                             "Relays need updating. Response: " + responseRelays
                                 + ", participant:" + participant.getRelays());
-                    }
                 }
             }
 
@@ -174,7 +177,6 @@ public class OctoChannelAllocator extends AbstractChannelAllocator
                     null,
                     participant.getSourcesCopy(),
                     participant.getSourceGroupsCopy(),
-                    null,
                     null,
                     null,
                     participant.getRelays());

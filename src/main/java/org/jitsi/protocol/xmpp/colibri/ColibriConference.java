@@ -17,8 +17,9 @@
  */
 package org.jitsi.protocol.xmpp.colibri;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.protocol.xmpp.colibri.exception.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import net.java.sip.communicator.service.protocol.*;
 
 import org.jitsi.jicofo.*;
@@ -92,8 +93,6 @@ public interface ColibriConference
     /**
      * Creates channels on the videobridge for given parameters.
      *
-     * @param useBundle <tt>true</tt> if channel transport bundle should be used
-     * for this allocation.
      * @param endpointId the ID of the Colibri endpoint.
      * @param statsId the statistics Id to use if any.
      * @param peerIsInitiator <tt>true</tt> if peer is ICE an initiator
@@ -101,19 +100,16 @@ public interface ColibriConference
      * @param contents content list that describes peer media.
      * @return <tt>ColibriConferenceIQ</tt> that describes allocated channels.
      *
-     * @throws OperationFailedException if channel allocation failed due to
-     * network or bridge failure.
+     * @throws OperationFailedException if channel allocation fails.
      */
     default ColibriConferenceIQ createColibriChannels(
-        boolean useBundle,
         String endpointId,
         String statsId,
         boolean peerIsInitiator,
         List<ContentPacketExtension> contents)
-        throws OperationFailedException
+        throws ColibriException
     {
         return createColibriChannels(
-            useBundle,
             endpointId,
             statsId,
             peerIsInitiator,
@@ -126,8 +122,6 @@ public interface ColibriConference
     /**
      * Creates channels on the videobridge for given parameters.
      *
-     * @param useBundle <tt>true</tt> if channel transport bundle should be used
-     * for this allocation.
      * @param endpointId the ID of the Colibri endpoint.
      * @param statsId the statistics Id to use if any.
      * @param peerIsInitiator <tt>true</tt> if peer is ICE an initiator
@@ -141,11 +135,9 @@ public interface ColibriConference
      * request, if any.
      * @return <tt>ColibriConferenceIQ</tt> that describes allocated channels.
      *
-     * @throws OperationFailedException if channel allocation failed due to
-     * network or bridge failure.
+     * @throws ColibriException if channel allocation fails.
      */
     ColibriConferenceIQ createColibriChannels(
-            boolean useBundle,
             String endpointId,
             String statsId,
             boolean peerIsInitiator,
@@ -153,7 +145,7 @@ public interface ColibriConference
             Map<String, List<SourcePacketExtension>> sources,
             Map<String, List<SourceGroupPacketExtension>> sourceGroups,
             List<String> relays)
-        throws OperationFailedException;
+        throws ColibriException;
 
     /**
      * Does Colibri channels update of RTP description, SSRC and transport
@@ -189,7 +181,7 @@ public interface ColibriConference
             rtpInfoMap,
             sources,
             sourceGroups,
-            null, null, null, null);
+            null, null, null);
     }
 
     /**
@@ -214,14 +206,10 @@ public interface ColibriConference
      * Colibri content name to a list of <tt>SourceGroupPacketExtension</tt>
      * which will be used to update SSRCs of the channel in corresponding
      * content described by <tt>localChannelsInfo</tt>.
-     * @param bundleTransport (optional) the
+     * @param bundleTransport (mandatory) the
      * <tt>IceUdpTransportPacketExtension</tt> which will be used to set
      * "bundle" transport of the first channel bundle from
      * <tt>localChannelsInfo</tt>.
-     * @param transportMap  (optional) the map of
-     * <tt>IceUdpTransportPacketExtension</tt> to Colibri content name
-     * which will be used to update transport of the channels in corresponding
-     * content described by <tt>localChannelsInfo</tt>.
      * @param endpointId the ID of the endpoint for which the update applies
      * (it is implicit that the update only works for channels of a single
      * @param relays the Octo relay IDs to set.
@@ -233,34 +221,8 @@ public interface ColibriConference
             MediaSourceMap sources,
             MediaSourceGroupMap sourceGroups,
             IceUdpTransportPacketExtension bundleTransport,
-            Map<String, IceUdpTransportPacketExtension> transportMap,
             String endpointId,
             List<String> relays);
-
-    /**
-     * Updates the RTP description for active channels (existing on the bridge).
-     *
-     * @param map the map of content name to RTP description packet extension.
-     * @param localChannelsInfo <tt>ColibriConferenceIQ</tt> that contains
-     * the description of the channel for which the RTP description will be
-     * updated on the bridge.
-     */
-    void updateRtpDescription(
-            Map<String, RtpDescriptionPacketExtension> map,
-            ColibriConferenceIQ localChannelsInfo);
-
-    /**
-     * Updates transport information for active channels
-     * (existing on the bridge).
-     *
-     * @param map the map of content name to transport packet extension.
-     * @param localChannelsInfo <tt>ColibriConferenceIQ</tt> that contains
-     * the description of the channel for which transport information will be
-     * updated on the bridge.
-     */
-    void updateTransportInfo(
-            Map<String, IceUdpTransportPacketExtension>   map,
-            ColibriConferenceIQ                           localChannelsInfo);
 
     /**
      * Updates simulcast layers on the bridge.
@@ -318,15 +280,6 @@ public interface ColibriConference
      * instance must not be used anymore.
      */
     void dispose();
-
-    /**
-     * Checks whether or not this instance has been disposed. The instance must
-     * not be used for any Colibri operations once disposed.
-     *
-     * @return <tt>true</tt> if this instance is in "disposed" state or
-     * <tt>false</tt> otherwise.
-     */
-    boolean isDisposed();
 
     /**
      * Sets the "global" id of the conference.

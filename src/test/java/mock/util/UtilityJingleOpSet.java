@@ -18,8 +18,8 @@
 package mock.util;
 
 import mock.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-import net.java.sip.communicator.util.*;
+import org.jitsi.utils.logging.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 
 import org.jitsi.protocol.xmpp.*;
 

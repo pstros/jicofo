@@ -17,13 +17,14 @@
  */
 package org.jitsi.jicofo.recording.jibri;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jibri.*;
-import net.java.sip.communicator.util.*;
+import org.jitsi.utils.logging.*;
+import org.jitsi.xmpp.extensions.jibri.*;
 
 import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.jicofo.xmpp.*;
 import org.jitsi.osgi.*;
+import org.json.simple.*;
 import org.jxmpp.jid.*;
 
 /**
@@ -185,5 +186,19 @@ public class JibriDetector
         {
             logger.warn("No EventAdmin!");
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    public JSONObject getStats()
+    {
+        JSONObject stats = new JSONObject();
+        stats.put("count", getInstanceCount(null));
+        stats.put(
+            "available",
+            getInstanceCount(
+                    brewInstance ->
+                        brewInstance.status != null
+                            && brewInstance.status.isAvailable()));
+        return stats;
     }
 }

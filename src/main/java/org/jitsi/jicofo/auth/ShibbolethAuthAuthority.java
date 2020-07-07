@@ -17,12 +17,13 @@
  */
 package org.jitsi.jicofo.auth;
 
-import org.jitsi.impl.protocol.xmpp.extensions.*;
-import org.jitsi.util.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import org.jivesoftware.smack.packet.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Shibboleth implementation of {@link AuthenticationAuthority} interface.
@@ -114,7 +115,7 @@ public class ShibbolethAuthAuthority
     {
         super(disableAutoLogin, authenticationLifetime);
         // Override authenticate URL ?
-        if (!StringUtils.isNullOrEmpty(loginUrlPattern)
+        if (isNotBlank(loginUrlPattern)
                 && !DEFAULT_URL_CONST.equals(loginUrlPattern))
         {
             this.loginUrlPattern = loginUrlPattern;

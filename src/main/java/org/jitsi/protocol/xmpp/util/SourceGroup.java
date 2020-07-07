@@ -17,14 +17,14 @@
  */
 package org.jitsi.protocol.xmpp.util;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-import net.java.sip.communicator.impl.protocol.jabber.jinglesdp.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 
 import org.jitsi.jicofo.*;
-import org.jitsi.util.*;
 
 import java.util.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Wrapper for <tt>SourceGroupPacketExtension</tt>.
@@ -48,7 +48,7 @@ public class SourceGroup
     public static List<SourceGroup> getSourceGroupsForContent(
             ContentPacketExtension content)
     {
-        List<SourceGroup> groups = new ArrayList<SourceGroup>();
+        List<SourceGroup> groups = new ArrayList<>();
 
         RtpDescriptionPacketExtension rtpDescPe
             = JingleUtils.getRtpDescription(content);
@@ -209,8 +209,7 @@ public class SourceGroup
 
         SourceGroup other = (SourceGroup) obj;
         String semantics = other.getSemantics();
-        if (StringUtils.isNullOrEmpty(semantics)
-            && !StringUtils.isNullOrEmpty(getSemantics()))
+        if (isBlank(semantics) && isNotBlank(getSemantics()))
         {
             return false;
         }

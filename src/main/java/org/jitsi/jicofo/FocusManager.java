@@ -19,14 +19,22 @@ package org.jitsi.jicofo;
 
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.service.protocol.event.*;
-import net.java.sip.communicator.service.shutdown.*;
-import net.java.sip.communicator.util.*;
 
+import org.jetbrains.annotations.*;
+import org.jitsi.health.*;
+import org.jitsi.impl.protocol.xmpp.*;
+import org.jitsi.jicofo.bridge.*;
 import org.jitsi.jicofo.event.*;
+import org.jitsi.jicofo.health.*;
+import org.jitsi.jicofo.stats.*;
+import org.jitsi.jicofo.util.*;
+import org.jitsi.meet.*;
+import org.jitsi.osgi.*;
 import org.jitsi.service.configuration.*;
 import org.jitsi.eventadmin.*;
-import org.jitsi.util.Logger;
+import org.jitsi.utils.logging.Logger; // disambiguation
 
+import org.json.simple.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.impl.*;
 import org.jxmpp.jid.parts.*;
@@ -59,6 +67,15 @@ public class FocusManager
         = "org.jitsi.focus.IDLE_TIMEOUT";
 
     /**
+     * Name of configuration property which enables logging a thread dump when
+     * an idle focus timeout occurs. The value is a minimal interval in between
+     * the dumps logged (given in milliseconds). The features is disabled when
+     * set to negative value or not defined.
+     */
+    public static final String MIN_IDLE_THREAD_DUMP_INTERVAL_PNAME
+            = "org.jitsi.focus.MIN_IDLE_THREAD_DUMP_INTERVAL";
+
+    /**
      * Default amount of time for which the focus is being kept alive in idle
      * mode (no peers in the room).
      */
@@ -77,6 +94,12 @@ public class FocusManager
      */
     public static final String XMPP_DOMAIN_PNAME
         = "org.jitsi.jicofo.XMPP_DOMAIN";
+
+    /**
+     * The XMPP port for the main Jicofo user's XMPP connection.
+     */
+    public static final String XMPP_PORT_PNAME
+        = "org.jitsi.jicofo.XMPP_PORT";
 
     /**
      * The name of the configuration property that specifies XMPP domain of
@@ -114,28 +137,6 @@ public class FocusManager
      */
     public static final String JICOFO_SHORT_ID_PNAME
         = "org.jitsi.jicofo.SHORT_ID";
-
-    /**
-     * The name of the configuration property used to configure the PubSub node
-     * to which videobridges are publishing their stats. It is used to discover
-     * bridges automatically.
-     */
-    public static final String SHARED_STATS_PUBSUB_NODE_PNAME
-        = "org.jitsi.jicofo.STATS_PUBSUB_NODE";
-
-    /**
-     * A property to enable health check debug. Enabling this will result an
-     * extra thread which will be monitoring the health-checks execution times.
-     * The thread will print thread dump in the logs for those health checks
-     * which execute for more than 3 seconds.
-     */
-    private static final String HEALTH_CHECK_DEBUG_PROP_NAME =
-        "org.jitsi.jicofo.rest.HEALTH_CHECK_DEBUG_ENABLED";
-
-    /**
-     * Whether health check debug is enabled. Off by default.
-     */
-    private boolean healthChecksDebugEnabled = false;
 
     /**
      * The pseudo-random generator which is to be used when generating IDs.
@@ -202,6 +203,13 @@ public class FocusManager
     private JitsiMeetServices jitsiMeetServices;
 
     /**
+     * The XMPP connection provider that will be used to detect JVB's and
+     * allocate channels.
+     * See {@link BridgeMucDetector#tryLoadingJvbXmppProvider(ConfigurationService)}.
+     */
+    private ProtocolProviderHandler jvbProtocolProvider;
+
+    /**
      * Observes and discovers JVB instances and other conference components on
      * our XMPP domain.
      */
@@ -218,6 +226,11 @@ public class FocusManager
      * IQs sent from conference participants to the focus.
      */
     private MeetExtensionsHandler meetExtensionsHandler;
+
+    /**
+     * A class that holds Jicofo-wide statistics
+     */
+    private final Statistics statistics = new Statistics();
 
     /**
      * Starts this manager for given <tt>hostName</tt>.
@@ -240,22 +253,36 @@ public class FocusManager
                 config.getString(FOCUS_USER_NAME_PNAME));
 
         String focusUserPassword = config.getString(FOCUS_USER_PASSWORD_PNAME);
+        String xmppServerPort = config.getString(XMPP_PORT_PNAME);
 
         protocolProviderHandler.start(
-            hostName, focusUserDomain, focusUserPassword, focusUserName);
+            hostName,
+            xmppServerPort,
+            focusUserDomain,
+            focusUserPassword,
+            focusUserName);
+
+        jvbProtocolProvider = BridgeMucDetector.tryLoadingJvbXmppProvider(config);
+
+        if (jvbProtocolProvider == null) {
+            logger.warn(
+                "No dedicated JVB MUC XMPP connection configured"
+                    + " - falling back to the default XMPP connection");
+            jvbProtocolProvider = protocolProviderHandler;
+        } else {
+            logger.info("Using dedicated XMPP connection for JVB MUC: " + jvbProtocolProvider);
+            jvbProtocolProvider.register();
+        }
 
         jitsiMeetServices
             = new JitsiMeetServices(
                     protocolProviderHandler,
+                    jvbProtocolProvider,
                     focusUserDomain);
         jitsiMeetServices.start(bundleContext);
 
-        String statsPubSubNode
-            = config.getString(SHARED_STATS_PUBSUB_NODE_PNAME);
-
         componentsDiscovery = new ComponentsDiscovery(jitsiMeetServices);
-        componentsDiscovery.start(
-            xmppDomain, statsPubSubNode, protocolProviderHandler);
+        componentsDiscovery.start(xmppDomain, protocolProviderHandler);
 
         meetExtensionsHandler = new MeetExtensionsHandler(this);
 
@@ -266,9 +293,6 @@ public class FocusManager
 
         protocolProviderHandler.addRegistrationListener(this);
         protocolProviderHandler.register();
-
-        healthChecksDebugEnabled
-            = config.getBoolean(HEALTH_CHECK_DEBUG_PROP_NAME, false);
     }
 
     /**
@@ -302,7 +326,7 @@ public class FocusManager
     }
 
     /**
-     * Allocates new focus for given MUC room.
+     * Allocates new focus for given MUC room, using the default logging level.
      *
      * @param room the name of MUC room for which new conference has to be
      *             allocated.
@@ -325,6 +349,28 @@ public class FocusManager
     }
 
     /**
+     * Allocates new focus for given MUC room, including this conference
+     * in statistics.
+     *
+     * @param room the name of MUC room for which new conference has to be
+     *             allocated.
+     * @param properties configuration properties map included in the request.
+     * @return <tt>true</tt> if conference focus is in the room and ready to
+     *         handle session participants.
+     * @throws Exception if for any reason we have failed to create
+     *                   the conference
+     */
+    public boolean conferenceRequest(
+        EntityBareJid          room,
+        Map<String, String>    properties,
+        Level                  loggingLevel)
+        throws Exception
+    {
+        return conferenceRequest(room, properties, loggingLevel, true);
+    }
+
+
+    /**
      * Allocates new focus for given MUC room.
      *
      * @param room the name of MUC room for which new conference has to be
@@ -332,6 +378,8 @@ public class FocusManager
      * @param properties configuration properties map included in the request.
      * @param loggingLevel the logging level which should be used by the new
      * {@link JitsiMeetConference}
+     * @param includeInStatistics whether or not this conference should be
+     *                            included in statistics
      *
      * @return <tt>true</tt> if conference focus is in the room and ready to
      *         handle session participants.
@@ -341,7 +389,8 @@ public class FocusManager
     public boolean conferenceRequest(
             EntityBareJid          room,
             Map<String, String>    properties,
-            Level                  loggingLevel)
+            Level                  loggingLevel,
+            boolean                includeInStatistics)
         throws Exception
     {
         if (room == null)
@@ -360,7 +409,7 @@ public class FocusManager
                     return false;
                 }
 
-                conference = createConference(room, properties, loggingLevel);
+                conference = createConference(room, properties, loggingLevel, includeInStatistics);
             }
         }
 
@@ -402,12 +451,13 @@ public class FocusManager
      * @param properties configuration properties, see {@link JitsiMeetConfig}
      *                   for the list of valid properties.
      *
-     * @returns new {@link JitsiMeetConferenceImpl} instance
+     * @return new {@link JitsiMeetConferenceImpl} instance
      *
      * @throws Exception if any error occurs.
      */
     private JitsiMeetConferenceImpl createConference(
-            EntityBareJid room, Map<String, String> properties, Level logLevel)
+            EntityBareJid room, Map<String, String> properties,
+            Level logLevel, boolean includeInStatistics)
         throws Exception
     {
         JitsiMeetConfig config = new JitsiMeetConfig(properties);
@@ -419,11 +469,20 @@ public class FocusManager
         String id = generateConferenceId();
         JitsiMeetConferenceImpl conference
             = new JitsiMeetConferenceImpl(
-                    room, focusUserName, protocolProviderHandler,
-                    this, config, globalConfig, logLevel, id);
+                    room,
+                    focusUserName,
+                    protocolProviderHandler,
+                    jvbProtocolProvider,
+                    this, config, globalConfig, logLevel,
+                    id, includeInStatistics);
 
         conferences.put(room, conference);
         conferenceIds.add(id);
+
+        if (includeInStatistics)
+        {
+            statistics.totalConferencesCreated.incrementAndGet();
+        }
 
         if (conference.getLogger().isInfoEnabled())
         {
@@ -439,6 +498,7 @@ public class FocusManager
                     .append(option.getValue())
                     .append(" ");
             }
+            sb.append(options);
 
             logger.info(sb);
         }
@@ -473,9 +533,8 @@ public class FocusManager
         {
             do
             {
-                id
-                    = jicofoShortId +
-                        Integer.toHexString(RANDOM.nextInt(0x1_0000));
+                id = jicofoShortId +
+                        String.format("%04x", RANDOM.nextInt(0x1_0000));
             }
             while (conferenceIds.contains(id));
         }
@@ -564,6 +623,20 @@ public class FocusManager
     }
 
     /**
+     * Get the conferences of this Jicofo.  Note that the
+     * List returned is a snapshot of the conference
+     * references at the time of the call.
+     * @return the list of conferences
+     */
+    public List<JitsiMeetConference> getConferences()
+    {
+        synchronized (conferencesSyncRoot)
+        {
+            return new ArrayList<>(conferences.values());
+        }
+    }
+
+    /**
      * Enables shutdown mode which means that no new focus instances will
      * be allocated. After conference count drops to zero the process will exit.
      */
@@ -589,9 +662,9 @@ public class FocusManager
                 // hold the lock or not. Presumably it is safe to call it
                 // multiple times.
                 ShutdownService shutdownService
-                    = ServiceUtils.getService(
-                    FocusBundleActivator.bundleContext,
-                    ShutdownService.class);
+                    = ServiceUtils2.getService(
+                        FocusBundleActivator.bundleContext,
+                        ShutdownService.class);
 
                 shutdownService.beginShutdown();
             }
@@ -604,6 +677,13 @@ public class FocusManager
     public int getConferenceCount()
     {
         return conferences.size();
+    }
+
+    private int getNonHealthCheckConferenceCount()
+    {
+        return (int)conferences.values().stream()
+            .filter(JitsiMeetConferenceImpl::includeInStatistics)
+            .count();
     }
 
     /**
@@ -631,6 +711,89 @@ public class FocusManager
     public JitsiMeetServices getJitsiMeetServices()
     {
         return jitsiMeetServices;
+    }
+
+    @SuppressWarnings("unchecked")
+    public JSONObject getStats()
+    {
+        // We want to avoid exposing unnecessary hierarchy levels in the stats,
+        // so we'll merge stats from different "child" objects here.
+        JSONObject stats = jitsiMeetServices.getStats();
+        stats.put("total_participants", statistics.totalParticipants.get());
+        stats.put("total_conferences_created", statistics.totalConferencesCreated.get());
+        stats.put("conferences", getNonHealthCheckConferenceCount());
+
+        // Calculate the number of participants and conference size distribution
+        int numParticipants = 0;
+        int largestConferenceSize = 0;
+        int[] conferenceSizes = new int[22];
+        for (JitsiMeetConference conference : getConferences())
+        {
+            if (!conference.includeInStatistics())
+            {
+                continue;
+            }
+            int confSize = conference.getParticipantCount();
+            // getParticipantCount only includes endpoints with allocated media
+            // channels, so if a single participant is waiting in a meeting
+            // they wouldn't be counted.  In stats, calling this a conference
+            // with size 0 would be misleading, so we add 1 in this case to
+            // properly show it as a conference of size 1.  (If there really
+            // weren't any participants in there at all, the conference
+            // wouldn't have existed in the first place).
+            if (confSize == 0)
+            {
+                confSize = 1;
+            }
+            numParticipants += confSize;
+            largestConferenceSize = Math.max(largestConferenceSize, confSize);
+
+            int conferenceSizeIndex = confSize < conferenceSizes.length
+                    ? confSize
+                    : conferenceSizes.length - 1;
+            conferenceSizes[conferenceSizeIndex]++;
+        }
+
+        stats.put("largest_conference", largestConferenceSize);
+        stats.put("participants", numParticipants);
+        JSONArray conferenceSizesJson = new JSONArray();
+        for (int size : conferenceSizes)
+        {
+            conferenceSizesJson.add(size);
+        }
+        stats.put("conference_sizes", conferenceSizesJson);
+
+        // XMPP traffic stats
+        ProtocolProviderService pps
+            = protocolProviderHandler.getProtocolProvider();
+        if (pps instanceof XmppProtocolProvider)
+        {
+            XmppProtocolProvider xmppProtocolProvider
+                    = (XmppProtocolProvider) pps;
+
+            stats.put("xmpp", xmppProtocolProvider.getStats());
+        }
+
+        HealthCheckService healthService
+            = ServiceUtils2.getService(
+                    FocusBundleActivator.bundleContext,
+                    HealthCheckService.class);
+        if (healthService instanceof Health)
+        {
+            Health health = (Health) healthService;
+
+            stats.put("slow_health_check", health.getTotalSlowHealthChecks());
+        }
+
+        return stats;
+    }
+
+    /**
+     * Returns {@link ProtocolProviderService} for the JVB XMPP connection.
+     */
+    public ProtocolProviderService getJvbProtocolProvider()
+    {
+        return jvbProtocolProvider.getProtocolProvider();
     }
 
     /**
@@ -683,13 +846,9 @@ public class FocusManager
         }
     }
 
-    /**
-     * {@see FocusManager#healthChecksDebugEnabled}
-     * @return true if enabled.
-     */
-    public boolean isHealthChecksDebugEnabled()
+    public @NotNull Statistics getStatistics()
     {
-        return healthChecksDebugEnabled;
+        return statistics;
     }
 
     /**
@@ -699,6 +858,16 @@ public class FocusManager
     private class FocusExpireThread
     {
         private static final long POLL_INTERVAL = 5000;
+
+        /**
+         * Remembers when was the last thread dump taken for the focus idle timeout.
+         */
+        private long lastThreadDump;
+
+        /**
+         * A thread dump for the focus idle should not be taken
+         */
+        private final long minThreadDumpInterval;
 
         private final long timeout;
 
@@ -712,6 +881,16 @@ public class FocusManager
         {
             timeout = FocusBundleActivator.getConfigService()
                         .getLong(IDLE_TIMEOUT_PNAME, DEFAULT_IDLE_TIMEOUT);
+            minThreadDumpInterval
+                    = FocusBundleActivator.getConfigService()
+                        .getLong(MIN_IDLE_THREAD_DUMP_INTERVAL_PNAME, -1);
+            if (minThreadDumpInterval >= 0) {
+                logger.info(
+                    "Focus idle thread dumps are enabled"
+                            + " with min interval of "
+                            + minThreadDumpInterval
+                            + " ms");
+            }
         }
 
         void start()
@@ -721,14 +900,7 @@ public class FocusManager
                 throw new IllegalStateException();
             }
 
-            timeoutThread = new Thread(new Runnable()
-            {
-                @Override
-                public void run()
-                {
-                    expireLoop();
-                }
-            }, "FocusExpireThread");
+            timeoutThread = new Thread(this::expireLoop, "FocusExpireThread");
 
             enabled = true;
 
@@ -803,10 +975,12 @@ public class FocusManager
                         }
                         if (System.currentTimeMillis() - idleStamp > timeout)
                         {
-                            if (conference.getLogger().isInfoEnabled())
+                            if (conference.getLogger().isInfoEnabled()) {
                                 logger.info(
                                         "Focus idle timeout for "
-                                            + conference.getRoomName());
+                                                + conference.getRoomName());
+                                this.maybeLogIdleTimeoutThreadDump();
+                            }
 
                             conference.stop();
                         }
@@ -817,6 +991,20 @@ public class FocusManager
                     logger.warn(
                         "Error while checking for timed out conference", ex);
                 }
+            }
+        }
+
+        private void maybeLogIdleTimeoutThreadDump() {
+            if (minThreadDumpInterval < 0) {
+                return;
+            }
+
+            if (System.currentTimeMillis() - lastThreadDump
+                    > minThreadDumpInterval) {
+                lastThreadDump = System.currentTimeMillis();
+                logger.info(
+                    "Thread dump for idle timeout: \n"
+                            + ThreadDump.takeThreadDump());
             }
         }
     }

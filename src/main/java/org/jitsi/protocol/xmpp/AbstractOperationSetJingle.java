@@ -17,13 +17,12 @@
  */
 package org.jitsi.protocol.xmpp;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jitsimeet.*;
 import net.java.sip.communicator.service.protocol.*;
-import net.java.sip.communicator.util.*;
 
-import org.jitsi.impl.protocol.xmpp.extensions.*;
+import org.jitsi.utils.logging.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.jitsimeet.*;
 import org.jitsi.protocol.xmpp.util.*;
 
 import org.jivesoftware.smack.iqrequest.*;
@@ -68,7 +67,7 @@ public abstract class AbstractOperationSetJingle
         JingleSession session = getSession(packet.getSID());
         if (session == null)
         {
-            logger.error("No session found for SID " + packet.getSID());
+            logger.warn("No session found for SID " + packet.getSID());
             return
                 IQ.createErrorResponse(
                     packet,
@@ -144,7 +143,18 @@ public abstract class AbstractOperationSetJingle
 
         IQ reply = getConnection().sendPacketAndGetReply(inviteIQ);
 
-        return wasInviteAccepted(session, reply);
+        if (reply == null || IQ.Type.result.equals(reply.getType()))
+        {
+            return true;
+        }
+        else
+        {
+            logger.error(
+                    "Unexpected response to 'session-initiate' from "
+                            + session.getAddress() + ": "
+                            + reply.toXML());
+            return false;
+        }
     }
 
     /**
@@ -187,13 +197,6 @@ public abstract class AbstractOperationSetJingle
                 = GroupPacketExtension.createBundleGroup(contents);
 
             inviteIQ.addExtension(group);
-
-            for (ContentPacketExtension content : contents)
-            {
-                // FIXME: is it mandatory ?
-                // http://estos.de/ns/bundle
-                content.addChildExtension(new BundlePacketExtension());
-            }
         }
 
         // FIXME Move this to a place where offer's contents are created or
@@ -208,58 +211,6 @@ public abstract class AbstractOperationSetJingle
         }
 
         return inviteIQ;
-    }
-
-    /**
-     * Determines whether a specific {@link JingleSession} has been accepted by
-     * the client judging by a specific {@code reply} {@link IQ} (received in
-     * reply to an invite IQ sent withing the specified {@code JingleSession}).
-     *
-     * @param session <tt>JingleSession</tt> instance for which we're evaluating
-     * the response value.
-     * @param reply <tt>IQ</tt> response to Jingle invite IQ or <tt>null</tt> in
-     * case of timeout.
-     *
-     * @return <tt>true</tt> if the invite IQ to which {@code reply} replies is
-     * considered accepted; <tt>false</tt>, otherwise.
-     */
-    private boolean wasInviteAccepted(JingleSession session, IQ reply)
-    {
-        if (reply == null)
-        {
-            // XXX By the time the acknowledgement timeout occurs, we may have
-            // received and acted upon the session-accept. We have seen that
-            // happen multiple times: the conference is established, the media
-            // starts flowing between the participants (i.e. we have acted upon
-            // the session-accept), and the conference is suddenly torn down
-            // (because the acknowldegment timeout has occured eventually). As a
-            // workaround, we will ignore the lack of the acknowledgment if we
-            // have already acted upon the session-accept.
-            if (session.isAccepted())
-            {
-                return true;
-            }
-            else
-            {
-                logger.error(
-                        "Timeout waiting for RESULT response to "
-                            + "'session-initiate' request from "
-                            + session.getAddress());
-                return false;
-            }
-        }
-        else if (IQ.Type.result.equals(reply.getType()))
-        {
-            return true;
-        }
-        else
-        {
-            logger.error(
-                    "Failed to send 'session-initiate' to "
-                        + session.getAddress() + ", error: "
-                        + reply.getError());
-            return false;
-        }
     }
 
     /**
@@ -304,12 +255,20 @@ public abstract class AbstractOperationSetJingle
                     "Session does not exist for: " + address);
         }
 
-        // Reset 'accepted' flag on the session
-        session.setAccepted(false);
-
         IQ reply = getConnection().sendPacketAndGetReply(jingleIQ);
 
-        return wasInviteAccepted(session, reply);
+        if (reply == null || IQ.Type.result.equals(reply.getType()))
+        {
+            return true;
+        }
+        else
+        {
+            logger.error(
+                    "Unexpected response to 'transport-replace' from "
+                            + session.getAddress() + ": "
+                            + reply.toXML());
+            return false;
+        }
     }
 
     /**
@@ -331,7 +290,7 @@ public abstract class AbstractOperationSetJingle
 
         if (session == null)
         {
-            logger.error(
+            logger.warn(
                 "Action: " + action
                     + ", no session found for SID " + iq.getSID());
             return IQ.createErrorResponse(
@@ -344,6 +303,9 @@ public abstract class AbstractOperationSetJingle
         {
         case SESSION_ACCEPT:
             error = requestHandler.onSessionAccept(session, iq.getContentList());
+            break;
+        case SESSION_INFO:
+            error = requestHandler.onSessionInfo(session, iq);
             break;
         case TRANSPORT_ACCEPT:
             error = requestHandler.onTransportAccept(session, iq.getContentList());

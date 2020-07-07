@@ -21,8 +21,8 @@ import mock.*;
 import mock.jvb.*;
 import mock.util.*;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 
 import org.jitsi.jicofo.util.*;
 import org.jitsi.protocol.xmpp.colibri.*;
@@ -70,11 +70,11 @@ public class ColibriTest
         EntityBareJid roomName = JidCreate.entityBareFrom(
                 "testroom@conference.pawel.jitsi.net");
         String serverName = "test-server";
-        JitsiMeetConfig config
-            = new JitsiMeetConfig(new HashMap<String,String>());
+        JitsiMeetConfig config = new JitsiMeetConfig(new HashMap<>());
 
         TestConference testConference
             = TestConference.allocate(osgi.bc, serverName, roomName);
+        MockVideobridge mockBridge = testConference.getMockVideoBridge();
 
         MockProtocolProvider pps
             = testConference.getFocusProtocolProvider();
@@ -86,8 +86,7 @@ public class ColibriTest
 
         colibriConf.setConfig(config);
 
-        colibriConf.setJitsiVideobridge(
-            testConference.getMockVideoBridge().getBridgeJid());
+        colibriConf.setJitsiVideobridge(mockBridge.getBridgeJid());
 
         List<ContentPacketExtension> contents = new ArrayList<>();
 
@@ -106,22 +105,18 @@ public class ColibriTest
         contents.add(video);
         contents.add(data);
 
-        MockVideobridge mockBridge = testConference.getMockVideoBridge();
-
-        boolean peer1UseBundle = true;
         String peer1 = "endpoint1";
-        boolean peer2UseBundle = true;
         String peer2 = "endpoint2";
 
         ColibriConferenceIQ peer1Channels
             = colibriConf.createColibriChannels(
-                peer1UseBundle, peer1, null, true, contents);
+                peer1, null, true, contents);
 
         assertEquals(3 , mockBridge.getChannelsCount());
 
         ColibriConferenceIQ peer2Channels
             = colibriConf.createColibriChannels(
-                peer2UseBundle, peer2, null, true, contents);
+                peer2, null, true, contents);
 
         assertEquals(6 , mockBridge.getChannelsCount());
 

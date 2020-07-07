@@ -17,27 +17,24 @@
  */
 package org.jitsi.impl.protocol.xmpp.colibri;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.colibri.*;
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
 import net.java.sip.communicator.service.protocol.*;
-import net.java.sip.communicator.util.Logger;
-
-import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.*;
-import org.jitsi.jicofo.event.*;
-import org.jitsi.jicofo.util.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.protocol.xmpp.colibri.*;
+import org.jitsi.protocol.xmpp.colibri.exception.*;
 import org.jitsi.protocol.xmpp.util.*;
 import org.jitsi.service.neomedia.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
+import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import org.jitsi.xmpp.util.*;
-
 import org.jivesoftware.smack.packet.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.parts.*;
 
 import java.util.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Default implementation of {@link ColibriConference} that uses Smack for
@@ -59,12 +56,6 @@ public class ColibriConferenceImpl
     private final XmppConnection connection;
 
     /**
-     * The {@link EventAdmin} instance used to emit video stream estimation
-     * events.
-     */
-    private final EventAdmin eventAdmin;
-
-    /**
      * XMPP address of videobridge component.
      */
     private Jid jitsiVideobridge;
@@ -73,12 +64,6 @@ public class ColibriConferenceImpl
      * The {@link ColibriConferenceIQ} that stores the state of whole conference
      */
     private ColibriConferenceIQ conferenceState = new ColibriConferenceIQ();
-
-    /**
-     * Lock used to synchronise access to the fields related with video channels
-     * counting and video stream estimation events.
-     */
-    private final Object stateEstimationSync = new Object();
 
     /**
      * Synchronization root to sync access to {@link #colibriBuilder} and
@@ -101,22 +86,14 @@ public class ColibriConferenceImpl
         = new ConferenceCreationSemaphore();
 
     /**
-     * The error code produced by the allocator thread which is to be passed to
-     * the waiting threads, so that they will throw
-     * {@link OperationFailedException} consistent with the allocator thread.
+     * The exception produced by the allocator thread which is to be passed to
+     * the waiting threads, so that they will throw exceptions consistent with
+     * the allocator thread.
      *
-     * Note: this and {@link #allocChannelsErrorMsg} are only used to modify
-     * the message logged when an exception is thrown. They are NOT used to
-     * decide whether to throw an exception or not.
+     * Note: this is only used to modify the message logged when an exception
+     * is thrown. It is NOT used to decide whether to throw an exception or not.
      */
-    private int allocChannelsErrorCode = -1;
-
-    /**
-     * The error message produced by the allocator thread which is to be passed
-     * to the waiting threads, so that they will throw
-     * {@link OperationFailedException} consistent with the allocator thread.
-     */
-    private String allocChannelsErrorMsg = null;
+    private ColibriException allocateChannelsException = null;
 
     /**
      * Utility used for building Colibri queries.
@@ -139,12 +116,6 @@ public class ColibriConferenceImpl
     private boolean disposed;
 
     /**
-     * Counts how many video channels have been allocated in order to be able
-     * to estimate video stream count changes.
-     */
-    private int videoChannels;
-
-    /**
      * The global ID of the conference.
      */
     private String gid;
@@ -153,14 +124,10 @@ public class ColibriConferenceImpl
      * Creates new instance of <tt>ColibriConferenceImpl</tt>.
      * @param connection XMPP connection object that wil be used by the new
      *        instance to communicate.
-     * @param eventAdmin {@link EventAdmin} instance which will be used to post
-     *        {@link BridgeEvent#VIDEOSTREAMS_CHANGED}.
      */
-    public ColibriConferenceImpl(XmppConnection    connection,
-                                 EventAdmin        eventAdmin)
+    public ColibriConferenceImpl(XmppConnection connection)
     {
         this.connection = Objects.requireNonNull(connection, "connection");
-        this.eventAdmin = Objects.requireNonNull(eventAdmin, "eventAdmin");
     }
 
     /**
@@ -206,7 +173,7 @@ public class ColibriConferenceImpl
     @Override
     public void setJitsiVideobridge(Jid videobridgeJid)
     {
-        if (!StringUtils.isNullOrEmpty(conferenceState.getID()))
+        if (isNotBlank(conferenceState.getID()))
         {
             throw new IllegalStateException(
                 "Cannot change the bridge on active conference");
@@ -253,7 +220,6 @@ public class ColibriConferenceImpl
      */
     @Override
     public ColibriConferenceIQ createColibriChannels(
-            boolean useBundle,
             String endpointId,
             String statsId,
             boolean peerIsInitiator,
@@ -261,12 +227,9 @@ public class ColibriConferenceImpl
             Map<String, List<SourcePacketExtension>> sourceMap,
             Map<String, List<SourceGroupPacketExtension>> sourceGroupsMap,
             List<String> octoRelayIds)
-        throws OperationFailedException
+        throws ColibriException
     {
         ColibriConferenceIQ allocateRequest;
-        // How many new video channels will be allocated
-        final int newVideoChannelsCount
-            = JingleOfferFactory.containsVideoContent(contents) ? 1 : 0;
 
         boolean conferenceExisted;
         try
@@ -279,21 +242,13 @@ public class ColibriConferenceImpl
                     return null;
                 }
 
-                if (newVideoChannelsCount != 0)
-                {
-                    synchronized (stateEstimationSync)
-                    {
-                        trackVideoChannelsAddedRemoved(newVideoChannelsCount);
-                    }
-                }
-
                 conferenceExisted
                     = !acquireCreateConferenceSemaphore(endpointId);
 
                 colibriBuilder.reset();
 
                 colibriBuilder.addAllocateChannelsReq(
-                    useBundle,
+                    true /* use bundle */,
                     endpointId,
                     statsId,
                     peerIsInitiator,
@@ -348,31 +303,6 @@ public class ColibriConferenceImpl
                         (ColibriConferenceIQ) response, contents);
 
         }
-        catch (Exception e)
-        {
-            try
-            {
-                synchronized (syncRoot)
-                {
-                    // Emit channels expired
-                    if (!checkIfDisposed("post channels expired on Exception"))
-                    {
-                        synchronized (stateEstimationSync)
-                        {
-                            trackVideoChannelsAddedRemoved(
-                                -newVideoChannelsCount);
-                        }
-                    }
-                }
-            }
-            catch (Exception innerException)
-            {
-                // Log the inner Exception
-                logger.error(innerException.getMessage(), innerException);
-            }
-
-            throw e;
-        }
         finally
         {
             releaseCreateConferenceSemaphore(endpointId);
@@ -381,35 +311,30 @@ public class ColibriConferenceImpl
 
     /**
      * Verifies the JVB's response to allocate channel request and sets
-     * {@link #allocChannelsErrorCode} and {@link #allocChannelsErrorMsg}.
+     * {@link #allocateChannelsException}.
      *
-     * @param response the packet received from JVB(null == timeout) as
-     *                 a response to Colibri allocate channels request.
+     * @param response the packet received from the bridge (with {@code null}
+     * meaning a timeout) as a response to a request to allocate Colibri
+     * channels.
      *
-     * @throws OperationFailedException with error code set to:
-     * <li>{@link OperationFailedException#NETWORK_FAILURE}</li> in case of
-     * a timeout.
-     * <li>{@link OperationFailedException#ILLEGAL_ARGUMENT}</li> in case of
-     * "bad request" response returned by the JVB
-     * <li>{@link OperationFailedException#GENERAL_ERROR}</li> in case of other
-     * error that may indicate that the JVB instance is faulty.
-     *
+     * @throws TimeoutException in case of a timeout.
+     * @throws ConferenceNotFoundException if the request referenced a colibri
+     * conference which does not exist on the bridge.
+     * @throws BadRequestException if the response
+     * @throws WrongResponseTypeException if the response contains no error, but
+     * is not of the expected {@link ColibriConferenceIQ} type.
+     * @throws ColibriConference in case the response contained an XMPP error
+     * not listed above.
      */
     private void maybeThrowOperationFailed(Stanza response)
-        throws OperationFailedException
+        throws ColibriException
     {
-        // This code block must be protected, because in the last "if" a
-        // decision is made based on the value of allocChannelsErrorCode, which
-        // could have been written by another thread.
         synchronized (syncRoot)
         {
+            ColibriException exception = null;
             if (response == null)
             {
-                allocChannelsErrorCode
-                    = OperationFailedException.NETWORK_FAILURE;
-                allocChannelsErrorMsg
-                    = "Failed to allocate colibri channels: response is null."
-                            + " Maybe the response timed out.";
+                exception = new TimeoutException();
             }
             else if (response.getError() != null)
             {
@@ -417,41 +342,48 @@ public class ColibriConferenceImpl
                 if (XMPPError.Condition
                     .bad_request.equals(error.getCondition()))
                 {
-                    allocChannelsErrorCode
-                        = OperationFailedException.ILLEGAL_ARGUMENT;
-                    allocChannelsErrorMsg
-                        = "Failed to allocate colibri channels - bad request: "
-                                + response.toXML();
+                    // Currently jitsi-videobridge returns the same error type
+                    // (bad-request) for two separate cases:
+                    // 1. The request was valid, but the conference ID was not
+                    // found (e.g. it has expired)
+                    // 2. The request was invalid (e.g. the endpoint ID format
+                    // was invalid).
+                    //
+                    // We want to handle the two cases differently, so we
+                    // distinguish them by matching the string.
+                    if (error.getDescriptiveText() != null &&
+                            error.getDescriptiveText()
+                                    .matches("Conference not found for ID:.*"))
+                    {
+                        exception
+                            = new ConferenceNotFoundException(
+                                    error.getConditionText());
+                    }
+                    else
+                    {
+                        exception
+                            = new BadRequestException(
+                                    response.toXML().toString());
+                    }
                 }
                 else
                 {
-                    allocChannelsErrorCode
-                        = OperationFailedException.GENERAL_ERROR;
-                    allocChannelsErrorMsg
-                        = "Failed to allocate colibri channels: "
-                                + response.toXML();
+                    exception
+                        = new ColibriException(
+                                "XMPP error: " + response.toXML());
                 }
             }
             else if (!(response instanceof ColibriConferenceIQ))
             {
-                allocChannelsErrorCode = OperationFailedException.GENERAL_ERROR;
-                allocChannelsErrorMsg
-                    = "Failed to allocate colibri channels: response is not a"
-                            + " colibri conference";
-            }
-            else
-            {
-                allocChannelsErrorCode = -1;
-                allocChannelsErrorMsg = null;
+                exception
+                    = new WrongResponseTypeException(
+                            response.getClass().getCanonicalName());
             }
 
-            if (allocChannelsErrorCode != -1)
+            this.allocateChannelsException = exception;
+            if (exception != null)
             {
-                throw new OperationFailedException(
-                    allocChannelsErrorMsg, allocChannelsErrorCode,
-                    response == null
-                        ? null
-                        : new Exception(response.toXML().toString()));
+                throw exception;
             }
         }
     }
@@ -467,12 +399,12 @@ public class ColibriConferenceImpl
      *
      * @return <tt>true</tt> if current thread is conference creator.
      *
-     * @throws OperationFailedException if conference creator thread has failed
-     *         to allocate new conference and current thread has been waiting
-     *         to acquire the semaphore.
+     * @throws ColibriConference if the current thread is not the conference
+     * creator thread and the conference creator thread produced an exception.
+     * The exception will be a clone of the original.
      */
     protected boolean acquireCreateConferenceSemaphore(String endpointId)
-        throws OperationFailedException
+        throws ColibriException
     {
         return createConfSemaphore.acquire();
     }
@@ -501,14 +433,21 @@ public class ColibriConferenceImpl
      * @return <tt>Packet</tt> which is JVB response or <tt>null</tt> if
      *         the request timed out.
      *
-     * @throws OperationFailedException see throws description of
-     * {@link XmppConnection#sendPacketAndGetReply(IQ)}.
+     * @throws ColibriException If sending the packet fails (see
+     * {@link XmppConnection#sendPacketAndGetReply(IQ)}).
      */
     protected Stanza sendAllocRequest(String endpointId,
                                       ColibriConferenceIQ request)
-        throws OperationFailedException
+        throws ColibriException
     {
-        return connection.sendPacketAndGetReply(request);
+        try
+        {
+            return connection.sendPacketAndGetReply(request);
+        }
+        catch (OperationFailedException ofe)
+        {
+            throw new ColibriException(ofe.getMessage());
+        }
     }
 
     /**
@@ -553,7 +492,7 @@ public class ColibriConferenceImpl
     /**
      * {@inheritDoc}
      * </t>
-     * Does not block or wait for a response.
+     * Does not block nor wait for a response.
      */
     @Override
     public void expireChannels(ColibriConferenceIQ channelInfo)
@@ -579,94 +518,7 @@ public class ColibriConferenceImpl
         {
             logRequest("Expire peer channels", request);
 
-            connection.sendStanza(request);
-
-            synchronized (stateEstimationSync)
-            {
-                int expiredVideoChannels
-                    = ColibriConferenceIQUtil.getChannelCount(
-                            channelInfo, "video");
-
-                trackVideoChannelsAddedRemoved(-expiredVideoChannels);
-            }
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     * </t>
-     * Does not block or wait for a response.
-     */
-    @Override
-    public void updateRtpDescription(
-            Map<String, RtpDescriptionPacketExtension> descriptionMap,
-            ColibriConferenceIQ localChannelsInfo)
-    {
-        ColibriConferenceIQ request;
-
-        synchronized (syncRoot)
-        {
-            // Only if not in 'disposed' state
-            if (checkIfDisposed("updateRtpDescription"))
-            {
-                return;
-            }
-
-            colibriBuilder.reset();
-
-            for (String contentName : descriptionMap.keySet())
-            {
-                ColibriConferenceIQ.Channel channel
-                    = localChannelsInfo.getContent(contentName)
-                        .getChannels().get(0);
-                colibriBuilder.addRtpDescription(
-                        descriptionMap.get(contentName),
-                        contentName,
-                        channel);
-            }
-
-            request = colibriBuilder.getRequest(jitsiVideobridge);
-        }
-
-        if (request != null)
-        {
-            logRequest("Sending RTP desc update: ", request);
-
-            connection.sendStanza(request);
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     * </t>
-     * Does not block or wait for a response.
-     */
-    @Override
-    public void updateTransportInfo(
-            Map<String, IceUdpTransportPacketExtension> transportMap,
-            ColibriConferenceIQ localChannelsInfo)
-    {
-        ColibriConferenceIQ request;
-
-        synchronized (syncRoot)
-        {
-            if (checkIfDisposed("updateTransportInfo"))
-            {
-                return;
-            }
-
-            colibriBuilder.reset();
-
-            colibriBuilder
-                .addTransportUpdateReq(transportMap, localChannelsInfo);
-
-            request = colibriBuilder.getRequest(jitsiVideobridge);
-        }
-
-        if (request != null)
-        {
-            logRequest("Sending transport info update: ", request);
-
+            // Send and forget
             connection.sendStanza(request);
         }
     }
@@ -690,7 +542,7 @@ public class ColibriConferenceImpl
                 return;
             }
 
-            if (StringUtils.isNullOrEmpty(conferenceState.getID()))
+            if (isBlank(conferenceState.getID()))
             {
                 logger.error(
                         "Have not updated source info on the bridge - "
@@ -782,7 +634,7 @@ public class ColibriConferenceImpl
 
             colibriBuilder.reset();
 
-            if (StringUtils.isNullOrEmpty(conferenceState.getID()))
+            if (isBlank(conferenceState.getID()))
             {
                 logger.info("Nothing to expire - no conference allocated yet");
                 return;
@@ -822,15 +674,6 @@ public class ColibriConferenceImpl
      * {@inheritDoc}
      */
     @Override
-    public boolean isDisposed()
-    {
-        return disposed;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
     public boolean muteParticipant(ColibriConferenceIQ channelsInfo,
                                    boolean mute)
     {
@@ -846,7 +689,7 @@ public class ColibriConferenceImpl
         ColibriConferenceIQ.Content audioContent
             = channelsInfo.getContent("audio");
 
-        if (audioContent == null || StringUtils.isNullOrEmpty(request.getID()))
+        if (audioContent == null || isBlank(request.getID()))
         {
             logger.error("Failed to mute - no audio content." +
                              " Conf ID: " + request.getID());
@@ -864,7 +707,8 @@ public class ColibriConferenceImpl
             requestChannel.setID(channel.getID());
 
             requestChannel.setDirection(
-                    mute ? MediaDirection.SENDONLY : MediaDirection.SENDRECV);
+                    mute ? MediaDirection.SENDONLY.toString()
+                        : MediaDirection.SENDRECV.toString());
 
             requestContent.addChannel(requestChannel);
         }
@@ -916,7 +760,6 @@ public class ColibriConferenceImpl
             MediaSourceMap sources,
             MediaSourceGroupMap sourceGroups,
             IceUdpTransportPacketExtension bundleTransport,
-            Map<String, IceUdpTransportPacketExtension> transportMap,
             String endpointId,
             List<String> relays)
     {
@@ -966,17 +809,8 @@ public class ColibriConferenceImpl
             {
                 send = true;
             }
-            // Bundle transport...
-            if (bundleTransport != null
-                    && colibriBuilder.addBundleTransportUpdateReq(
-                            bundleTransport, endpointId))
-            {
-                send = true;
-            }
-            // ...or non-bundle transport
-            else if (transportMap != null
-                    && colibriBuilder.addTransportUpdateReq(
-                            transportMap, localChannelsInfo))
+            // Bundle transport
+            if (bundleTransport != null && colibriBuilder.addBundleTransportUpdateReq(bundleTransport, endpointId))
             {
                 send = true;
             }
@@ -994,62 +828,6 @@ public class ColibriConferenceImpl
             logRequest("Sending channel info update: ", request);
 
             connection.sendStanza(request);
-        }
-    }
-
-    /**
-     * Calculates how the video stream count will change after given video
-     * channel count modifier is applied to the current value. Video stream
-     * count is expressed as video channel count to the power of two.
-     * E.g.:
-     * current channels = 5
-     * modifier = -2
-     * result = 3 * 3 - 5 * 5 = -16
-     * Read that as "there will be 16 video streams less, after 2 video channels
-     * are removed".
-     *
-     * @param currentChannels how many video channels are there now
-     * @param channelCountDiff how many video channels are to be added/removed
-     *
-     * @return how many video streams will be added/removed when given
-     * <tt>channelCountDiff</tt> is applied to the current value.
-     */
-    static private int calcVideoStreamDiff(int currentChannels,
-                                           int channelCountDiff)
-    {
-        int newChannelCount = currentChannels + channelCountDiff;
-        return (newChannelCount * newChannelCount)
-                    - (currentChannels * currentChannels);
-    }
-
-    /**
-     * Method called whenever video channels are about to be allocated/expired,
-     * but before the actual request is sent. It will track the current video
-     * channel count and emit {@link BridgeEvent#VIDEOSTREAMS_CHANGED}.
-     *
-     * @param channelsDiff how many new video channels are to be
-     *        allocated/expired.
-     */
-    private void trackVideoChannelsAddedRemoved(int channelsDiff)
-    {
-        if (channelsDiff == 0)
-        {
-            return;
-        }
-
-        int streamDiff = calcVideoStreamDiff(videoChannels, channelsDiff);
-        videoChannels += channelsDiff;
-
-        if (streamDiff != 0)
-        {
-            eventAdmin.postEvent(
-                    BridgeEvent.createVideoStreamsChanged(
-                            jitsiVideobridge, streamDiff));
-        }
-        else
-        {
-            logger.error(
-                "Stream diff is zero ??? channels diff: " + channelsDiff);
         }
     }
 
@@ -1081,17 +859,15 @@ public class ColibriConferenceImpl
          *         creator. That is the thread that sends first channel allocate
          *         request that results in new conference created.
          *
-         * @throws OperationFailedException if we are not conference creator
+         * @throws ColibriException if we are not conference creator
          *         thread and conference creator has failed to create the
          *         conference while we've been waiting on this semaphore.
          */
         public boolean acquire()
-            throws OperationFailedException
+            throws ColibriException
         {
             synchronized (syncRoot)
             {
-                Jid jvbInUse = jitsiVideobridge;
-
                 if (conferenceState.getID() == null && creatorThread == null)
                 {
                     creatorThread = Thread.currentThread();
@@ -1128,11 +904,8 @@ public class ColibriConferenceImpl
 
                     if (conferenceState.getID() == null)
                     {
-                        throw new OperationFailedException(
-                            "Creator thread has failed to "
-                                + "allocate channels on: " + jvbInUse
-                                + ", msg: " + allocChannelsErrorMsg,
-                            allocChannelsErrorCode);
+                        throw allocateChannelsException.clone(
+                            "Creator thread has failed to allocate channels: ");
                     }
 
                     if (logger.isDebugEnabled())

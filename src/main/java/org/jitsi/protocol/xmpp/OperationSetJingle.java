@@ -17,7 +17,7 @@
  */
 package org.jitsi.protocol.xmpp;
 
-import net.java.sip.communicator.impl.protocol.jabber.extensions.jingle.*;
+import org.jitsi.xmpp.extensions.jingle.*;
 import net.java.sip.communicator.service.protocol.*;
 
 import org.jitsi.protocol.xmpp.util.*;
@@ -44,8 +44,7 @@ public interface OperationSetJingle
      * @param requestHandler <tt>JingleRequestHandler</tt> that will be bound
      * to new Jingle session instance.
      *
-     * @return {@code true} if a response of type {@code result} is received
-     * before the timeout.
+     * @return {@code true} the client didn't come back with en error response.
      *
      * @throws OperationFailedException with
      * {@link OperationFailedException#PROVIDER_NOT_REGISTERED} if the operation
@@ -77,7 +76,7 @@ public interface OperationSetJingle
      * @param jingleIQ the IQ which to be sent.
      * @param session the <tt>JingleSession</tt> for which the IQ will be sent.
      *
-     * @return {@code true} if an IQ of type {@code result} is received.
+     * @return {@code true} the client didn't come back with an error response.
      *
      * @throws OperationFailedException with
      * {@link OperationFailedException#PROVIDER_NOT_REGISTERED} if the operation

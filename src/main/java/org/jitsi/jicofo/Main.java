@@ -21,7 +21,9 @@ import org.jitsi.cmd.*;
 import org.jitsi.jicofo.osgi.*;
 import org.jitsi.jicofo.xmpp.*;
 import org.jitsi.meet.*;
-import org.jitsi.util.*;
+import org.jitsi.utils.logging.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Provides the <tt>main</tt> entry point of Jitsi Meet conference focus.
@@ -30,6 +32,8 @@ import org.jitsi.util.*;
  */
 public class Main
 {
+    private static Logger logger = Logger.getLogger(Main.class);
+
     /**
      * The name of the command-line argument which specifies the XMPP domain
      * to use for the XMPP client connection.
@@ -104,12 +108,28 @@ public class Main
     private static final String SUBDOMAIN_ARG_VALUE = "focus";
 
     /**
+     * Stores {@link FocusComponent} instance for the health check purpose.
+     */
+    private static FocusComponent focusXmppComponent;
+
+    /**
+     * @return the Jicofo XMPP component.
+     */
+    public static FocusComponent getFocusXmppComponent()
+    {
+        return focusXmppComponent;
+    }
+
+    /**
      * Program entry point.
      * @param args command-line arguments.
      */
     public static void main(String[] args)
         throws ParseException
     {
+        Thread.setDefaultUncaughtExceptionHandler((t, e) ->
+            logger.error("An uncaught exception occurred in thread=" + t, e));
+
         CmdLine cmdLine = new CmdLine();
 
         cmdLine.addRequiredArgument(SECRET_ARG_NAME);
@@ -127,7 +147,7 @@ public class Main
                 HOST_ARG_NAME,
                 componentDomain == null ? HOST_ARG_VALUE : componentDomain);
         // Try to fix component domain
-        if (StringUtils.isNullOrEmpty(componentDomain))
+        if (isBlank(componentDomain))
         {
             componentDomain = host;
         }
@@ -155,7 +175,7 @@ public class Main
         System.setProperty(FocusManager.XMPP_DOMAIN_PNAME, componentDomain);
         System.setProperty(FocusManager.FOCUS_USER_DOMAIN_PNAME, focusDomain);
         System.setProperty(FocusManager.FOCUS_USER_NAME_PNAME, focusUserName);
-        if (!StringUtils.isNullOrEmpty(focusPassword))
+        if (isNotBlank(focusPassword))
         {
             System.setProperty(
                     FocusManager.FOCUS_USER_PASSWORD_PNAME, focusPassword);
@@ -163,15 +183,15 @@ public class Main
 
         ComponentMain componentMain = new ComponentMain();
 
-        boolean focusAnonymous = StringUtils.isNullOrEmpty(focusPassword);
+        boolean focusAnonymous = isBlank(focusPassword);
 
-        FocusComponent component
+        focusXmppComponent
             = new FocusComponent(
                     host, port, componentDomain, componentSubDomain,
                     secret, focusAnonymous, focusUserName + "@" + focusDomain);
 
         JicofoBundleConfig osgiBundles = new JicofoBundleConfig();
 
-        componentMain.runMainProgramLoop(component, osgiBundles);
+        componentMain.runMainProgramLoop(focusXmppComponent, osgiBundles);
     }
 }
