@@ -22,6 +22,7 @@ import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.*;
 import org.apache.http.client.methods.*;
 import org.apache.http.impl.client.*;
+import org.apache.http.impl.*;
 import org.apache.http.message.*;
 import org.apache.http.util.*;
 import org.jitsi.impl.reservation.rest.json.*;
