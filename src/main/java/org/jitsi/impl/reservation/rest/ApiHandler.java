@@ -56,7 +56,10 @@ public class ApiHandler
      * HTTP client used for sending requests.
      */
     private final CloseableHttpClient client
-            = HttpClientBuilder.create().build();
+            = HttpClientBuilder
+              .create()
+              .setConnectionReuseStrategy(NoConnectionReuseStrategy.INSTANCE)
+              .build();
 
     /**
      * <tt>JSONParser</tt> instance used for parsing JSON.
@@ -119,7 +122,7 @@ public class ApiHandler
                         entry.getKey(), String.valueOf(entry.getValue())));
         }
 
-        post.setEntity(new UrlEncodedFormEntity(nameValuePairs, "UTF8"));
+        post.setEntity(new UrlEncodedFormEntity(nameValuePairs, "UTF-8"));
 
         logger.info("Sending post: " + jsonMap);
 
