@@ -414,10 +414,7 @@ public abstract class AbstractAuthAuthority
     public IQ processAuthentication(
             ConferenceIq query, ConferenceIq response)
     {
-        synchronized (syncRoot)
-        {
-            return processAuthLocked(query, response);
-        }
+         return processAuthLocked(query, response);
     }
 
     /**
