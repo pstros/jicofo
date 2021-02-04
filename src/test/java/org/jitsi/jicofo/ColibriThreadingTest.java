@@ -22,11 +22,11 @@ import mock.jvb.*;
 import mock.xmpp.*;
 import mock.xmpp.colibri.*;
 
+import org.jitsi.jicofo.codec.*;
+import org.jitsi.protocol.xmpp.colibri.exception.*;
 import org.jitsi.xmpp.extensions.colibri.*;
 import org.jitsi.xmpp.extensions.jingle.*;
-import net.java.sip.communicator.service.protocol.*;
 
-import org.jitsi.jicofo.util.*;
 import org.jitsi.protocol.xmpp.colibri.*;
 
 import org.jivesoftware.smack.packet.*;
@@ -191,7 +191,7 @@ public class ColibriThreadingTest
         }
 
         assertEquals(1, mockBridge.getConferenceCount());
-        assertEquals(allocators.length * 3, mockBridge.getChannelsCount());
+        assertEquals(allocators.length, mockBridge.getEndpointCount());
 
         mockBridge.stop(osgi.bc);
     }
@@ -304,23 +304,18 @@ public class ColibriThreadingTest
         mockBridge.stop(osgi.bc);
     }
 
+    /**
+     * Default config.
+     */
+    private static JitsiMeetConfig config = new JitsiMeetConfig(new HashMap<>());
+
     static List<ContentPacketExtension> createContents()
     {
-        List<ContentPacketExtension> contents
-            = new ArrayList<>();
+        OfferOptions offerOptions = new OfferOptions();
+        OfferOptionsKt.applyConstraints(offerOptions, config);
+        offerOptions.setRtx(false);
 
-        JingleOfferFactory jingleOfferFactory
-            = FocusBundleActivator.getJingleOfferFactory();
-
-        contents.add(jingleOfferFactory.createAudioContent(
-                    false, true, false, false, false));
-
-        contents.add(jingleOfferFactory.createVideoContent(
-                    false, true, false, false, false, -1, -1));
-
-        contents.add(jingleOfferFactory.createDataContent(false, true));
-
-        return contents;
+        return FocusBundleActivator.getJingleOfferFactory().createOffer(offerOptions);
     }
 
     class MockPeerAllocator
@@ -354,9 +349,9 @@ public class ColibriThreadingTest
                     try
                     {
                         channels = colibriConference.createColibriChannels(
-                            true, endpointId, null, true, createContents());
+                            endpointId, null, true, createContents());
                     }
-                    catch (OperationFailedException e)
+                    catch (ColibriException e)
                     {
                         e.printStackTrace();
                     }

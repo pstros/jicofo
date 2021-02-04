@@ -17,13 +17,14 @@
  */
 package org.jitsi.jicofo;
 
-import org.jitsi.utils.*;
 import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.impl.*;
 import org.jxmpp.stringprep.*;
 
 import java.util.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Class encapsulates configuration properties for Jitsi Meet conference that
@@ -79,6 +80,11 @@ public class JitsiMeetConfig
     public static final String PNAME_ENABLE_TCC = "enableTcc";
 
     /**
+     * Whether RED should be enabled for opus.
+     */
+    public static final String PNAME_ENABLE_OPUS_RED = "enableOpusRed";
+
+    /**
      * The name of the property that specifies JID of the bridge which should be
      * used instead of any bridges elected by <tt>BridgeSelector</tt>.
      * The property is meant to be used in a test that aims to run a conference
@@ -129,6 +135,11 @@ public class JitsiMeetConfig
      * The name of the "stereo" property.
      */
     public static final String PNAME_STEREO = "stereo";
+
+    /**
+     * The name of the "maxaveragebitrate" property.
+     */
+    public static final String PNAME_OPUS_MAX_AVG_BITRATE = "opusMaxAverageBitrate";
 
     /**
      * The name of the "octo" property.
@@ -184,7 +195,7 @@ public class JitsiMeetConfig
         try
         {
             String enforcedBridge = properties.get(PNAME_ENFORCED_BRIDGE);
-            if (StringUtils.isNullOrEmpty(enforcedBridge))
+            if (isBlank(enforcedBridge))
             {
                 return null;
             }
@@ -240,8 +251,7 @@ public class JitsiMeetConfig
     public boolean isRtxEnabled()
     {
         String disableRtxStr = properties.get(PNAME_DISABLE_RTX);
-        return StringUtils.isNullOrEmpty(disableRtxStr)
-            || !Boolean.parseBoolean(disableRtxStr);
+        return isBlank(disableRtxStr) || !Boolean.parseBoolean(disableRtxStr);
     }
 
     /**
@@ -264,6 +274,12 @@ public class JitsiMeetConfig
         return enableTcc == null ? DEFAULT_ENABLE_TCC : enableTcc;
     }
 
+    public boolean isOpusRedEnabled()
+    {
+        Boolean enableOpusRed = getBoolean(PNAME_ENABLE_OPUS_RED);
+        return enableOpusRed != null && enableOpusRed;
+    }
+
     /**
      * Gets the minimum number of participants that need to be present in the
      * call before we start it.
@@ -279,9 +295,10 @@ public class JitsiMeetConfig
      * Returns the value of the open sctp configuration property or
      * <tt>null</tt> if it has not been specified.
      */
-    public Boolean openSctp()
+    public boolean openSctp()
     {
-        return getBoolean(PNAME_OPEN_SCTP);
+        Boolean openSctp = getBoolean(PNAME_OPEN_SCTP);
+        return openSctp == null || openSctp;
     }
 
     private Boolean getBoolean(String name)
@@ -289,7 +306,7 @@ public class JitsiMeetConfig
         String stringValue = properties.get(name);
         Boolean boolValue = null;
 
-        if (!StringUtils.isNullOrEmpty(stringValue))
+        if (isNotBlank(stringValue))
         {
             //try
             //{
@@ -309,7 +326,7 @@ public class JitsiMeetConfig
         String stringValue = properties.get(name);
         Integer intValue = null;
 
-        if (!StringUtils.isNullOrEmpty(stringValue))
+        if (isNotBlank(stringValue))
         {
             try
             {
@@ -366,6 +383,15 @@ public class JitsiMeetConfig
     {
         Boolean stereo = getBoolean(PNAME_STEREO);
         return stereo != null && stereo;
+    }
+
+    /**
+     * @return the "maxaveragebitrate" which should be included in offers or -1 if not specified.
+     */
+    public int getOpusMaxAverageBitrate()
+    {
+        Integer maxAvgBitrate = getInt(PNAME_OPUS_MAX_AVG_BITRATE);
+        return maxAvgBitrate == null ? -1 : maxAvgBitrate;
     }
 
     public boolean isOctoEnabled()

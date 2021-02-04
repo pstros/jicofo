@@ -18,6 +18,8 @@
 package org.jitsi.jicofo;
 
 import net.java.sip.communicator.service.protocol.*;
+import org.jitsi.jicofo.bridge.*;
+import org.jitsi.jicofo.recording.jibri.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
@@ -51,9 +53,9 @@ public class MockJitsiMeetConference
     }
 
     @Override
-    public List<Bridge> getBridges()
+    public Map<Bridge, Integer> getBridges()
     {
-        return new LinkedList<>();
+        return new HashMap<>();
     }
 
     @Override
@@ -77,6 +79,12 @@ public class MockJitsiMeetConference
     @Override
     public void setStartMuted(boolean[] startMuted)
     {
+    }
+
+    @Override
+    public JibriSessionStats getJibriSessionStats()
+    {
+        return new JibriSessionStats();
     }
 
     @Override

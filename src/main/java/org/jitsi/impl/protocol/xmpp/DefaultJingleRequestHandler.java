@@ -17,8 +17,8 @@
  */
 package org.jitsi.impl.protocol.xmpp;
 
+import org.jitsi.utils.logging.*;
 import org.jitsi.xmpp.extensions.jingle.*;
-import net.java.sip.communicator.util.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jivesoftware.smack.packet.*;
 
@@ -62,6 +62,14 @@ public class DefaultJingleRequestHandler
                                 List<ContentPacketExtension> answer)
     {
         logger.warn("Ignored Jingle 'session-accept'");
+
+        return null;
+    }
+
+    @Override
+    public XMPPError onSessionTerminate(JingleSession jingleSession, JingleIQ iq)
+    {
+        logger.warn("Ignored Jingle 'session-terminate'");
 
         return null;
     }

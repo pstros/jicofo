@@ -17,10 +17,10 @@
  */
 package org.jitsi.jicofo;
 
+import org.jitsi.jicofo.codec.*;
+import org.jitsi.protocol.xmpp.colibri.exception.*;
 import org.jitsi.xmpp.extensions.colibri.*;
 import org.jitsi.xmpp.extensions.jingle.*;
-import net.java.sip.communicator.service.protocol.*;
-import org.jitsi.jicofo.util.*;
 import org.jitsi.utils.logging.*;
 
 import java.util.*;
@@ -76,36 +76,11 @@ public class OctoChannelAllocator extends AbstractChannelAllocator
     @Override
     protected List<ContentPacketExtension> createOffer()
     {
-        JitsiMeetConfig config = meetConference.getConfig();
+        OfferOptions options = OfferOptionsKt.getOctoOptions();
+        OfferOptionsKt.applyConstraints(options, meetConference.getConfig());
 
-        boolean useIce = false;
-        boolean useDtls = false;
-        boolean useRtx = false; // config.isRtxEnabled();
-        boolean enableRemb = false; // config.isRembEnabled();
-        boolean enableTcc = false; // config.isTccEnabled();
-        boolean useSctp = false; // config.openSctp() == null || config.openSctp();
-
-        JingleOfferFactory jingleOfferFactory
-            = FocusBundleActivator.getJingleOfferFactory();
-
-        List<ContentPacketExtension> contents = new ArrayList<>();
-        contents.add(
-            jingleOfferFactory.createAudioContent(
-                    !useIce, useDtls, config.stereoEnabled(),
-                    enableRemb, enableTcc));
-
-        contents.add(
-            jingleOfferFactory.createVideoContent(
-                    !useIce, useDtls, useRtx, enableRemb, enableTcc,
-                    -1, -1));
-
-        if (useSctp)
-        {
-            contents.add(
-                jingleOfferFactory.createDataContent(!useIce, useDtls));
-        }
-
-        return contents;
+        JingleOfferFactory jingleOfferFactory = FocusBundleActivator.getJingleOfferFactory();
+        return jingleOfferFactory.createOffer(options);
     }
 
     /**
@@ -114,12 +89,11 @@ public class OctoChannelAllocator extends AbstractChannelAllocator
     @Override
     protected ColibriConferenceIQ doAllocateChannels(
         List<ContentPacketExtension> offer)
-        throws OperationFailedException
+        throws ColibriException
     {
         // This is a blocking call.
         ColibriConferenceIQ result =
             bridgeSession.colibriConference.createColibriChannels(
-                true /* bundle */,
                 null /* endpoint */,
                 null /* statsId */,
                 false/* initiator */,
@@ -177,7 +151,6 @@ public class OctoChannelAllocator extends AbstractChannelAllocator
                     null,
                     participant.getSourcesCopy(),
                     participant.getSourceGroupsCopy(),
-                    null,
                     null,
                     null,
                     participant.getRelays());

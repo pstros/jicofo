@@ -19,11 +19,11 @@ package org.jitsi.jicofo;
 
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.service.protocol.event.*;
-import net.java.sip.communicator.util.*;
 
 import org.jitsi.jicofo.util.*;
 import org.jitsi.protocol.xmpp.*;
 
+import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.parts.*;
 import org.osgi.framework.*;
@@ -69,12 +69,14 @@ public class ProtocolProviderHandler
     /**
      * Start this instance by created XMPP account using the given parameters.
      * @param serverAddress XMPP server address.
+     * @param serverPort XMPP server port.
      * @param xmppDomain XMPP authentication domain.
      * @param xmppLoginPassword XMPP login(optional).
      * @param nickName authentication login.
      *
      */
     public void start(String serverAddress,
+                      String  serverPort,
                       DomainBareJid xmppDomain,
                       String xmppLoginPassword,
                       Resourcepart nickName)
@@ -90,7 +92,10 @@ public class ProtocolProviderHandler
                 = xmppProviderFactory.createAccount(
                 FocusAccountFactory.createFocusAccountProperties(
                     serverAddress,
-                    xmppDomain, nickName, xmppLoginPassword));
+                    serverPort,
+                    xmppDomain,
+                    nickName,
+                    xmppLoginPassword));
         }
         else
         {
@@ -98,7 +103,9 @@ public class ProtocolProviderHandler
                 = xmppProviderFactory.createAccount(
                 FocusAccountFactory.createFocusAccountProperties(
                     serverAddress,
-                    xmppDomain, nickName));
+                    serverPort,
+                    xmppDomain,
+                    nickName));
         }
 
         if (!xmppProviderFactory.loadAccount(xmppAccount))
@@ -134,6 +141,8 @@ public class ProtocolProviderHandler
     @Override
     public void registrationStateChanged(RegistrationStateChangeEvent evt)
     {
+        logger.info(this + ": " + evt);
+
         for(RegistrationStateChangeListener l : regListeners)
         {
             try

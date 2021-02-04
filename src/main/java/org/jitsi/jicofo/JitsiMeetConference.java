@@ -18,6 +18,8 @@
 package org.jitsi.jicofo;
 
 import net.java.sip.communicator.service.protocol.*;
+import org.jitsi.jicofo.bridge.*;
+import org.jitsi.jicofo.recording.jibri.*;
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
@@ -56,10 +58,10 @@ public interface JitsiMeetConference
     Participant findParticipantForRoomJid(Jid mucJid);
 
     /**
-     * @return the list of {@link Bridge} currently used by this
-     * conference.
+     * @return a map of the {@link Bridge}s currently used by this
+     * conference to the number of conference participants on each.
      */
-    List<Bridge> getBridges();
+    Map<Bridge, Integer> getBridges();
 
     /**
      * Returns the name of conference multi-user chat room.
@@ -85,6 +87,12 @@ public interface JitsiMeetConference
      * array is copied.
      */
     void setStartMuted(boolean[] startMuted);
+
+    /**
+     * @return a stats snapshot for all {@link JibriSession}s used in this
+     * conference.
+     */
+    JibriSessionStats getJibriSessionStats();
 
     /**
      * Gets the role of a member in the conference.

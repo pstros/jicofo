@@ -17,16 +17,16 @@
  */
 package mock.jvb;
 
+import org.jitsi.osgi.*;
 import org.jitsi.xmpp.extensions.colibri.*;
 import org.jitsi.xmpp.extensions.health.*;
-import net.java.sip.communicator.util.*;
 
 import org.jitsi.protocol.xmpp.*;
 import org.jitsi.utils.*;
 import org.jitsi.utils.logging.Logger;
 import org.jitsi.videobridge.*;
 
-import org.jitsi_modified.impl.neomedia.rtp.*;
+import org.jitsi.nlj.*;
 import org.jivesoftware.smack.iqrequest.*;
 import org.jivesoftware.smack.packet.*;
 
@@ -57,8 +57,6 @@ public class MockVideobridge
 
     private boolean returnServerError = false;
 
-    private VideobridgeBundleActivator jvbActivator;
-
     private ColibriConferenceIqHandler confIqGetHandler
             = new ColibriConferenceIqHandler(IQ.Type.get);
 
@@ -76,13 +74,9 @@ public class MockVideobridge
     }
 
     public void start(BundleContext bc)
-        throws Exception
     {
-        this.jvbActivator = new VideobridgeBundleActivator();
-
-        jvbActivator.start(bc);
-
-        bridge = ServiceUtils.getService(bc, Videobridge.class);
+        bridge = new Videobridge();
+        bridge.start(bc);
 
         connection.registerIQRequestHandler(confIqGetHandler);
         connection.registerIQRequestHandler(confIqSetHandler);
@@ -91,13 +85,12 @@ public class MockVideobridge
 
     @Override
     public void stop(BundleContext bundleContext)
-        throws Exception
     {
         connection.unregisterIQRequestHandler(confIqGetHandler);
         connection.unregisterIQRequestHandler(confIqSetHandler);
         connection.unregisterIQRequestHandler(healthCheckIqHandler);
 
-        jvbActivator.stop(bundleContext);
+        bridge.stop(bundleContext);
     }
 
     private class ColibriConferenceIqHandler extends AbstractIqRequestHandler
@@ -124,8 +117,7 @@ public class MockVideobridge
             try
             {
                 IQ confResult = bridge.handleColibriConferenceIQ(
-                        (ColibriConferenceIQ) iqRequest,
-                        Videobridge.OPTION_ALLOW_ANY_FOCUS);
+                        (ColibriConferenceIQ) iqRequest);
                 confResult.setTo(iqRequest.getFrom());
                 confResult.setStanzaId(iqRequest.getStanzaId());
                 return confResult;
@@ -175,22 +167,22 @@ public class MockVideobridge
         }
     }
 
-    public List<RTPEncodingDesc> getSimulcastLayers(
+    public List<RtpEncodingDesc> getSimulcastEncodings(
             String confId, String endpointId)
     {
-        Conference conference = bridge.getConference(confId, null);
+        Conference conference = bridge.getConference(confId);
         AbstractEndpoint endpoint = conference.getEndpoint(endpointId);
 
-        MediaStreamTrackDesc[] tracks = endpoint.getMediaStreamTracks();
+        MediaSourceDesc[] sources = endpoint.getMediaSources();
 
-        if (ArrayUtils.isNullOrEmpty(tracks))
+        if (ArrayUtils.isNullOrEmpty(sources))
             return new ArrayList<>();
 
-        RTPEncodingDesc[] layers = tracks[0].getRTPEncodings();
-        if (ArrayUtils.isNullOrEmpty(layers))
+        RtpEncodingDesc[] encodings = sources[0].getRtpEncodings();
+        if (ArrayUtils.isNullOrEmpty(encodings))
             return new ArrayList<>();
 
-        return Arrays.asList(layers);
+        return Arrays.asList(encodings);
     }
 
     /**
@@ -201,14 +193,16 @@ public class MockVideobridge
     public List<Conference> getNonHealthCheckConferences()
     {
         // Filter out conferences created for health checks
-        return Arrays.stream(bridge.getConferences())
+        return bridge.getConferences().stream()
                 .filter(Conference::includeInStatistics)
                 .collect(Collectors.toList());
     }
 
-    public int getChannelsCount()
+    public int getEndpointCount()
     {
-        return bridge.getChannelCount();
+        return bridge.getConferences().stream()
+                .mapToInt(Conference::getEndpointCount)
+                .sum();
     }
 
     public Jid getBridgeJid()

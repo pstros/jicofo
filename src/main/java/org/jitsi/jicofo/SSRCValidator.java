@@ -17,11 +17,11 @@
  */
 package org.jitsi.jicofo;
 
+import org.jitsi.utils.*;
 import org.jitsi.xmpp.extensions.colibri.*;
 import org.jitsi.xmpp.extensions.jingle.*;
 
 import org.jitsi.protocol.xmpp.util.*;
-import org.jitsi.utils.*;
 import org.jitsi.utils.logging.*;
 
 import org.jivesoftware.smack.packet.*;
@@ -29,6 +29,8 @@ import org.jxmpp.jid.*;
 
 import java.util.*;
 import java.util.stream.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Utility class that wraps the process of validating new sources and source
@@ -163,7 +165,7 @@ public class SSRCValidator
                 // Skip RID simulcast group
                 continue;
             }
-            else if (StringUtils.isNullOrEmpty(simulcastMsid))
+            else if (isBlank(simulcastMsid))
             {
                 throw new InvalidSSRCsException(
                         "No MSID in simulcast group: " + simGrouping);
@@ -355,6 +357,35 @@ public class SSRCValidator
         return new Object[] { acceptedSources, acceptedGroups };
     }
 
+    /**
+     * Makes an attempt to remove given sources and source groups from
+     * the current state.
+     *
+     * @param sourcesToRemove the sources to be removed
+     * @param groupsToRemove the groups to be removed
+     *
+     * @return an array of two objects where first one is <tt>MediaSourceMap</tt>
+     * contains the sources that have been removed and the second one is
+     * <tt>MediaSourceGroupMap</tt> with <tt>SourceGroup</tt>s removed by this
+     * validator instance.
+     *
+     * @throws InvalidSSRCsException if a critical problem has been found
+     * after sources/groups removal which would probably would result in
+     * "setRemoteDescription" error on the client.
+     */
+    public Object[] tryRemoveSourcesAndGroups(
+            MediaSourceMap sourcesToRemove,
+            MediaSourceGroupMap groupsToRemove)
+        throws InvalidSSRCsException
+    {
+        MediaSourceMap removedSources = sources.remove(sourcesToRemove);
+        MediaSourceGroupMap removedGroups = sourceGroups.remove(groupsToRemove);
+
+        this.validateStreams();
+
+        return new Object[] { removedSources, removedGroups };
+    }
+
     private void filterOutParams(SourcePacketExtension copy)
     {
         Iterator<? extends ExtensionElement> params
@@ -407,7 +438,7 @@ public class SSRCValidator
                     {
                         String msid = SSRCSignaling.getMsid(source);
                         // Grouped SSRC needs to have a valid MSID
-                        if (StringUtils.isNullOrEmpty(groupMSID))
+                        if (isBlank(groupMSID))
                         {
                             throw new InvalidSSRCsException(
                                     "Grouped " + source + " has no 'msid'");
@@ -436,8 +467,18 @@ public class SSRCValidator
                 continue;
             }
 
-            List<SimulcastGrouping> simGroupings
-                = sourceGroups.findSimulcastGroupings();
+            List<SimulcastGrouping> simGroupings;
+
+            try
+            {
+                simGroupings = sourceGroups.findSimulcastGroupings();
+            }
+            // If groups are in invalid state a SIM grouping may fail to
+            // initialize with IllegalArgumentException
+            catch (IllegalArgumentException exc)
+            {
+                throw new InvalidSSRCsException(exc.getMessage());
+            }
 
             // Check if this SIM group's MSID does not appear in any other
             // simulcast grouping

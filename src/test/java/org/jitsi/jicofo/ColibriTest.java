@@ -21,10 +21,10 @@ import mock.*;
 import mock.jvb.*;
 import mock.util.*;
 
+import org.jitsi.jicofo.codec.*;
 import org.jitsi.xmpp.extensions.colibri.*;
 import org.jitsi.xmpp.extensions.jingle.*;
 
-import org.jitsi.jicofo.util.*;
 import org.jitsi.protocol.xmpp.colibri.*;
 
 import org.junit.*;
@@ -88,39 +88,26 @@ public class ColibriTest
 
         colibriConf.setJitsiVideobridge(mockBridge.getBridgeJid());
 
-        List<ContentPacketExtension> contents = new ArrayList<>();
+        OfferOptions offerOptions = new OfferOptions();
+        OfferOptionsKt.applyConstraints(offerOptions, config);
+        offerOptions.setRtx(false);
 
-        JingleOfferFactory jingleOfferFactory
-            = FocusBundleActivator.getJingleOfferFactory();
-        ContentPacketExtension audio
-            = jingleOfferFactory.createAudioContent(
-                    false, true, false, false, false);
-        ContentPacketExtension video
-            = jingleOfferFactory.createVideoContent(
-                    false, true, false, false, false, -1, -1);
-        ContentPacketExtension data
-            = jingleOfferFactory.createDataContent(false, true);
+        List<ContentPacketExtension> contents = FocusBundleActivator.getJingleOfferFactory().createOffer(offerOptions);
 
-        contents.add(audio);
-        contents.add(video);
-        contents.add(data);
-
-        boolean peer1UseBundle = true;
         String peer1 = "endpoint1";
-        boolean peer2UseBundle = true;
         String peer2 = "endpoint2";
 
         ColibriConferenceIQ peer1Channels
             = colibriConf.createColibriChannels(
-                peer1UseBundle, peer1, null, true, contents);
+                peer1, null, true, contents);
 
-        assertEquals(3 , mockBridge.getChannelsCount());
+        assertEquals(1, mockBridge.getEndpointCount());
 
         ColibriConferenceIQ peer2Channels
             = colibriConf.createColibriChannels(
-                peer2UseBundle, peer2, null, true, contents);
+                peer2, null, true, contents);
 
-        assertEquals(6 , mockBridge.getChannelsCount());
+        assertEquals(2, mockBridge.getEndpointCount());
 
         assertEquals("Peer 1 should have 3 channels allocated",
                      3, countChannels(peer1Channels));
@@ -145,14 +132,14 @@ public class ColibriTest
         //FIXME: fix unreliable sleep call
         Thread.sleep(5000);
 
-        assertEquals(3, mockBridge.getChannelsCount());
+        assertEquals(1, mockBridge.getEndpointCount());
 
         colibriConf.expireChannels(peer1Channels);
 
         //FIXME: fix unreliable sleep call
         Thread.sleep(1000);
 
-        assertEquals(0 , mockBridge.getChannelsCount());
+        assertEquals(0, mockBridge.getEndpointCount());
 
         testConference.stop();
     }

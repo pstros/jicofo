@@ -19,15 +19,16 @@ package org.jitsi.jicofo.xmpp;
 
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.service.protocol.event.*;
-import net.java.sip.communicator.util.*;
 import org.jitsi.assertions.*;
 import org.jitsi.jicofo.*;
 import org.jitsi.protocol.xmpp.*;
+import org.jitsi.utils.logging.*;
 import org.jivesoftware.smack.packet.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.*;
 
 /**
  * <tt>BaseBrewery</tt> manages the pool of service instances which
@@ -188,6 +189,14 @@ public abstract class BaseBrewery<T extends ExtensionElement>
         catch (OperationFailedException | OperationNotSupportedException e)
         {
             logger.error("Failed to create room: " + breweryJid, e);
+
+            // cleanup on failure so we can retry
+            if (chatRoom != null)
+            {
+                chatRoom.removeMemberPresenceListener(this);
+                chatRoom.removeMemberPropertyChangeListener(this);
+                chatRoom = null;
+            }
         }
     }
 
@@ -196,21 +205,24 @@ public abstract class BaseBrewery<T extends ExtensionElement>
      */
     private void stop()
     {
-        if (chatRoom != null)
+        try
         {
-            chatRoom.removeMemberPresenceListener(this);
-            chatRoom.removeMemberPropertyChangeListener(this);
-            chatRoom.leave();
+            if(chatRoom != null)
+            {
+                chatRoom.removeMemberPresenceListener(this);
+                chatRoom.removeMemberPropertyChangeListener(this);
+                chatRoom.leave();
+
+                logger.info("Left brewery room: " + breweryJid);
+            }
+        }
+        finally
+        {
+            // even if leave fails we want to cleanup, so we can retry
             chatRoom = null;
 
-            logger.info("Left brewery room: " + breweryJid);
-        }
-
-        // Clean up the list of service instances
-        List<BrewInstance> instancesCopy = new ArrayList<>(instances);
-        for (BrewInstance i : instancesCopy)
-        {
-            removeInstance(i);
+            // Clean up the list of service instances
+            instances.forEach(this::removeInstance);
         }
     }
 
@@ -267,7 +279,7 @@ public abstract class BaseBrewery<T extends ExtensionElement>
             return;
         }
 
-        ExtensionElement ext
+        T ext
             = presence.getExtension(extensionElementName, extensionNamespace);
 
         // if the extension is missing skip processing
@@ -276,7 +288,7 @@ public abstract class BaseBrewery<T extends ExtensionElement>
             return;
         }
 
-        processInstanceStatusChanged(getJid(member), (T) ext);
+        processInstanceStatusChanged(getJid(member), ext);
     }
 
     /**
@@ -323,6 +335,18 @@ public abstract class BaseBrewery<T extends ExtensionElement>
         }
 
         onInstanceStatusChanged(instance.jid, extension);
+    }
+
+    public int getInstanceCount(Predicate<? super BrewInstance> filter)
+    {
+        if  (filter != null)
+        {
+            return (int) instances.stream()
+                    .filter(filter)
+                    .count();
+        }
+
+        return instances.size();
     }
 
     /**

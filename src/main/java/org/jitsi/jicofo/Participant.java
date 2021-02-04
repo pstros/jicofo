@@ -17,6 +17,7 @@
  */
 package org.jitsi.jicofo;
 
+import org.jitsi.xmpp.extensions.colibri.*;
 import org.jitsi.xmpp.extensions.jingle.*;
 
 import org.jitsi.jicofo.discovery.*;
@@ -25,7 +26,10 @@ import org.jitsi.protocol.xmpp.util.*;
 import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 
+import java.time.*;
 import java.util.*;
+
+import static java.time.temporal.ChronoUnit.SECONDS;
 
 /**
  * Class represent Jitsi Meet conference participant. Stores information about
@@ -41,8 +45,7 @@ public class Participant
      * The class logger which can be used to override logging level inherited
      * from {@link JitsiMeetConference}.
      */
-    private final static Logger classLogger
-        = Logger.getLogger(Participant.class);
+    private final static Logger classLogger = Logger.getLogger(Participant.class);
 
     /**
      * Returns the endpoint ID for a participant in the videobridge (Colibri)
@@ -66,6 +69,17 @@ public class Participant
     private JitsiMeetConferenceImpl.BridgeSession bridgeSession;
 
     /**
+     * The {@link Clock} used by this participant.
+     */
+    private Clock clock = Clock.systemUTC();
+
+    /**
+     * The list stored the timestamp when the last restart requests have been received for this participant and is used
+     * for rate limiting. See {@link #incrementAndCheckRestartRequests()} for more details.
+     */
+    private final Deque<Instant> restartRequests = new LinkedList<>();
+
+    /**
      * MUC chat member of this participant.
      */
     private final XmppChatMember roomMember;
@@ -83,18 +97,9 @@ public class Participant
     private final Logger logger;
 
     /**
-     * Stores information about bundled transport if {@link #hasBundleSupport()}
-     * returns <tt>true</tt>.
+     * Stores information about bundled transport
      */
     private IceUdpTransportPacketExtension bundleTransport;
-
-    /**
-     * Maps ICE transport information to the name of Colibri content. This is
-     * "non-bundled" transport which is used when {@link #hasBundleSupport()}
-     * returns <tt>false</tt>.
-     */
-    private Map<String, IceUdpTransportPacketExtension> transportMap
-        = new HashMap<>();
 
     /**
      * The list of XMPP features supported by this participant.
@@ -161,6 +166,15 @@ public class Participant
     }
 
     /**
+     * Sets the new clock instance to be used by this participant. Meant for testing.
+     * @param newClock - the new {@link Clock}
+     */
+    public void setClock(Clock newClock)
+    {
+        this.clock = newClock;
+    }
+
+    /**
      * Sets {@link JingleSession} established with this peer.
      * @param jingleSession the new Jingle session to be assigned to this peer.
      */
@@ -176,6 +190,14 @@ public class Participant
     public XmppChatMember getChatMember()
     {
         return roomMember;
+    }
+
+    /**
+     * @return {@link Clock} used by this participant instance.
+     */
+    public Clock getClock()
+    {
+        return clock;
     }
 
     /**
@@ -214,6 +236,52 @@ public class Participant
     }
 
     /**
+     * Returns {@code true} iff this participant supports RED for opus.
+     */
+    public boolean hasOpusRedSupport()
+    {
+        return supportedFeatures.contains(DiscoveryUtil.FEATURE_OPUS_RED);
+    }
+
+    /**
+     * Rate limiting mechanism for session restart requests received from participants.
+     * The rules ar as follows:
+     * - must be at least 10 second gap between the requests
+     * - no more than 3 requests within the last minute
+     *
+     * @return {@code true} if it's okay to process the request, as in it doesn't violate the current rate limiting
+     * policy, or {@code false} if the request should be denied.
+     */
+    public boolean incrementAndCheckRestartRequests()
+    {
+        final Instant now = Instant.now(clock);
+        Instant previousRequest = this.restartRequests.peekLast();
+
+        if (previousRequest == null)
+        {
+            this.restartRequests.add(now);
+
+            return true;
+        }
+
+        if (previousRequest.until(now, SECONDS) < 10)
+        {
+            return false;
+        }
+
+        // Allow only 3 requests within the last minute
+        this.restartRequests.removeIf(requestTime -> requestTime.until(now, SECONDS) > 60);
+        if (this.restartRequests.size() > 2)
+        {
+            return false;
+        }
+
+        this.restartRequests.add(now);
+
+        return true;
+    }
+
+    /**
      * FIXME: we need to remove "is SIP gateway code", but there are still
      * situations where we need to know whether given peer is a human or not.
      * For example when we close browser window and only SIP gateway stays
@@ -223,7 +291,15 @@ public class Participant
      */
     public boolean isSipGateway()
     {
-        return supportedFeatures.contains("http://jitsi.org/protocol/jigasi");
+        return supportedFeatures.contains(DiscoveryUtil.FEATURE_JIGASI);
+    }
+
+    /**
+     * Returns <tt>true</tt> if this participant is a Jibri instance.
+    */
+    public boolean isJibri()
+    {
+        return supportedFeatures.contains("http://jitsi.org/protocol/jibri");
     }
 
     /**
@@ -232,6 +308,14 @@ public class Participant
     public boolean hasAudioSupport()
     {
         return supportedFeatures.contains(DiscoveryUtil.FEATURE_AUDIO);
+    }
+
+    /**
+     * Returns <tt>true</tt> if RTP audio can be muted for this peer.
+     */
+    public boolean hasAudioMuteSupport()
+    {
+        return supportedFeatures.contains(DiscoveryUtil.FEATURE_AUDIO_MUTE);
     }
 
     /**
@@ -264,9 +348,13 @@ public class Participant
      * @param supportedFeatures the list of features to set.
      */
     public void setSupportedFeatures(List<String> supportedFeatures)
+        throws UnsupportedFeatureConfigurationException
     {
         this.supportedFeatures
             = Objects.requireNonNull(supportedFeatures, "supportedFeatures");
+        if (!hasBundleSupport()) {
+            throw new UnsupportedFeatureConfigurationException("Participant doesn't support bundle, which is required");
+        }
     }
 
     /**
@@ -299,10 +387,9 @@ public class Participant
 
     /**
      * Extracts and stores transport information from given map of Jingle
-     * content. Depending on the {@link #hasBundleSupport()} either 'bundle' or
-     * 'non-bundle' transport information will be stored. If we already have the
-     * transport information it will be merged into the currently stored one
-     * with {@link TransportSignaling#mergeTransportExtension}.
+     * content.  If we already have the transport information it will be
+     * merged into the currently stored one with
+     * {@link TransportSignaling#mergeTransportExtension}.
      *
      * @param contents the list of <tt>ContentPacketExtension</tt> from one of
      * jingle message which can potentially contain transport info like
@@ -310,69 +397,40 @@ public class Participant
      */
     public void addTransportFromJingle(List<ContentPacketExtension> contents)
     {
-        if (hasBundleSupport())
+        // Select first transport
+        IceUdpTransportPacketExtension transport = null;
+        for (ContentPacketExtension cpe : contents)
         {
-            // Select first transport
-            IceUdpTransportPacketExtension transport = null;
-            for (ContentPacketExtension cpe : contents)
+            IceUdpTransportPacketExtension contentTransport
+                = cpe.getFirstChildOfType(
+                        IceUdpTransportPacketExtension.class);
+            if (contentTransport != null)
             {
-                IceUdpTransportPacketExtension contentTransport
-                    = cpe.getFirstChildOfType(
-                            IceUdpTransportPacketExtension.class);
-                if (contentTransport != null)
-                {
-                    transport = contentTransport;
-                    break;
-                }
+                transport = contentTransport;
+                break;
             }
-            if (transport == null)
-            {
-                logger.error(
-                    "No valid transport supplied in transport-update from "
-                        + getChatMember().getContactAddress());
-                return;
-            }
+        }
+        if (transport == null)
+        {
+            logger.error(
+                "No valid transport supplied in transport-update from "
+                    + getChatMember().getContactAddress());
+            return;
+        }
 
-            if (!transport.isRtcpMux())
-            {
-                transport.addChildExtension(new RtcpmuxPacketExtension());
-            }
+        if (!transport.isRtcpMux())
+        {
+            transport.addChildExtension(new RtcpmuxPacketExtension());
+        }
 
-            if (bundleTransport == null)
-            {
-                bundleTransport = transport;
-            }
-            else
-            {
-                TransportSignaling.mergeTransportExtension(
-                        bundleTransport, transport);
-            }
+        if (bundleTransport == null)
+        {
+            bundleTransport = transport;
         }
         else
         {
-            for (ContentPacketExtension cpe : contents)
-            {
-                IceUdpTransportPacketExtension srcTransport
-                    = cpe.getFirstChildOfType(
-                            IceUdpTransportPacketExtension.class);
-
-                if (srcTransport != null)
-                {
-                    String contentName = cpe.getName().toLowerCase();
-                    IceUdpTransportPacketExtension dstTransport
-                        = transportMap.get(contentName);
-
-                    if (dstTransport == null)
-                    {
-                        transportMap.put(contentName, srcTransport);
-                    }
-                    else
-                    {
-                        TransportSignaling.mergeTransportExtension(
-                                dstTransport, srcTransport);
-                    }
-                }
-            }
+            TransportSignaling.mergeTransportExtension(
+                    bundleTransport, transport);
         }
     }
 
@@ -389,27 +447,12 @@ public class Participant
     }
 
     /**
-     * Returns 'non-bundled' transport information stored for this
-     * <tt>Participant</tt>.
-     *
-     * @return a map of <tt>IceUdpTransportPacketExtension</tt> to Colibri
-     * content name which describes 'non-bundled' transport of this participant
-     * or <tt>null</tt> either if it's not available yet or if 'bundled'
-     * transport is being used.
-     */
-    public Map<String, IceUdpTransportPacketExtension> getTransportMap()
-    {
-        return transportMap;
-    }
-
-    /**
      * Clears any ICE transport information currently stored for this
      * participant.
      */
     public void clearTransportInfo()
     {
         bundleTransport = null;
-        transportMap = new HashMap<>();
     }
 
     /**
@@ -494,24 +537,19 @@ public class Participant
      * Terminates the current {@code BridgeSession}, terminates the channel
      * allocator and resets any fields related to the session.
      *
-     * @param syncExpire whether or not the expire Colibri channels operation
-     * should be performed in a synchronous manner.
-     *
      * @return {@code BridgeSession} from which this {@code Participant} has
      * been removed or {@code null} if this {@link Participant} was not part
      * of any bridge session.
-     * @see ColibriConference#expireChannels(ColibriConferenceIQ, boolean)
+     * @see org.jitsi.protocol.xmpp.colibri.ColibriConference#expireChannels(ColibriConferenceIQ)
      */
-    @Deprecated
-    JitsiMeetConferenceImpl.BridgeSession terminateBridgeSession(
-            boolean syncExpire)
+    JitsiMeetConferenceImpl.BridgeSession terminateBridgeSession()
     {
         JitsiMeetConferenceImpl.BridgeSession _session = this.bridgeSession;
 
         if (_session != null)
         {
             this.setChannelAllocator(null);
-            _session.terminate(this, syncExpire);
+            _session.terminate(this);
             this.clearTransportInfo();
             this.setColibriChannelsInfo(null);
             this.bridgeSession = null;
@@ -520,18 +558,18 @@ public class Participant
         return _session;
     }
 
-    /**
-     * See {@link #terminateBridgeSession(boolean)}.
-     */
-    JitsiMeetConferenceImpl.BridgeSession terminateBridgeSession()
-    {
-        return terminateBridgeSession(false);
-    }
-
     @Override
     public String toString()
     {
-        return "Participant[endpointId=" + getEndpointId() + "]";
+        return "Participant[" + getMucJid() + "]@" + hashCode();
     }
 
+}
+
+class UnsupportedFeatureConfigurationException extends Exception
+{
+    public UnsupportedFeatureConfigurationException(String msg)
+    {
+        super(msg);
+    }
 }

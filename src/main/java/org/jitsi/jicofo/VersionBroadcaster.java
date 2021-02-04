@@ -17,10 +17,10 @@
  */
 package org.jitsi.jicofo;
 
+import org.jitsi.utils.logging.*;
 import org.jitsi.utils.version.*;
 import org.jitsi.xmpp.extensions.jitsimeet.*;
 import net.java.sip.communicator.service.protocol.*;
-import net.java.sip.communicator.util.*;
 
 import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.discovery.Version;
@@ -84,12 +84,12 @@ public class VersionBroadcaster
         throws Exception
     {
         focusManager
-            = ServiceUtils.getService(bundleContext, FocusManager.class);
+            = ServiceUtils2.getService(bundleContext, FocusManager.class);
 
         Objects.requireNonNull(focusManager, "focusManager");
 
         versionService
-            = ServiceUtils.getService(bundleContext, VersionService.class);
+            = ServiceUtils2.getService(bundleContext, VersionService.class);
 
         Objects.requireNonNull(versionService, "versionService");
 
@@ -172,7 +172,7 @@ public class VersionBroadcaster
                     + "(" + jicofoVersion.toString() + ","
                     + System.getProperty("os.name") + ")");
 
-        String jvbVersions = conference.getBridges().stream()
+        String jvbVersions = conference.getBridges().keySet().stream()
             .map(b -> b.getVersion())
             .filter(Objects::nonNull)
             .distinct()

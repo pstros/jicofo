@@ -17,6 +17,7 @@
  */
 package org.jitsi.jicofo.recording.jibri;
 
+import org.jitsi.jicofo.util.*;
 import org.jitsi.xmpp.extensions.jibri.*;
 import net.java.sip.communicator.service.protocol.*;
 import net.java.sip.communicator.service.protocol.event.*;
@@ -78,19 +79,27 @@ public class OperationSetJibri
     @Override
     public IQ handleIQRequest(IQ iq)
     {
+        CommonJibriStuff theJibri = null;
+
         synchronized (jibris)
         {
             for (CommonJibriStuff jibri : jibris)
             {
                 if (jibri.accept((JibriIq) iq))
                 {
-                    return jibri.handleIQRequest((JibriIq) iq);
+                    theJibri = jibri;
+                    break;
                 }
             }
         }
 
-        return IQ.createErrorResponse(iq, XMPPError.getBuilder(
-            XMPPError.Condition.item_not_found));
+        if (theJibri != null)
+        {
+            return theJibri.handleIQRequest((JibriIq) iq);
+        }
+
+        return ErrorResponse.create(
+                iq, XMPPError.Condition.item_not_found, null);
     }
 
     @Override

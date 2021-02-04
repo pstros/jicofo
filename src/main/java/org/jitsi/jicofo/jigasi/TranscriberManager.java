@@ -18,8 +18,8 @@
 
 package org.jitsi.jicofo.jigasi;
 
-import net.java.sip.communicator.util.*;
-import org.jitsi.utils.logging.Logger;
+import org.jitsi.osgi.*;
+import org.jitsi.utils.logging.*;
 import org.jitsi.xmpp.extensions.jitsimeet.*;
 import org.jitsi.xmpp.extensions.rayo.*;
 import net.java.sip.communicator.service.protocol.*;
@@ -188,7 +188,7 @@ public class TranscriberManager
     private Collection<String> getBridgeRegions()
     {
         FocusManager focusManager =
-            ServiceUtils.getService(
+            ServiceUtils2.getService(
                 FocusBundleActivator.bundleContext,
                 FocusManager.class);
 
@@ -205,7 +205,7 @@ public class TranscriberManager
             }
             else
             {
-                return conference.getBridges().stream()
+                return conference.getBridges().keySet().stream()
                     .map(b -> b.getRegion())
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());

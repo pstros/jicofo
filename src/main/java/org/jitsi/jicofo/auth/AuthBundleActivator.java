@@ -17,19 +17,20 @@
  */
 package org.jitsi.jicofo.auth;
 
-import net.java.sip.communicator.util.*;
-
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.servlet.*;
 import org.glassfish.jersey.servlet.*;
 import org.jitsi.jicofo.rest.*;
+import org.jitsi.osgi.*;
 import org.jitsi.rest.*;
 import org.jitsi.service.configuration.*;
-import org.jitsi.utils.*;
+import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.impl.*;
 import org.osgi.framework.*;
 
 import java.util.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Implements <tt>BundleActivator</tt> for the OSGi bundle responsible for
@@ -108,31 +109,9 @@ public class AuthBundleActivator
      */
     public AuthBundleActivator()
     {
-        super(AUTH_PNAME);
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    protected int getDefaultPort()
-    {
-        // The idea of overriding Videobridge's default is probably an attempt
-        // to have Videobridge and Jicofo running on the same machine with their
-        // defaults and without them clashing.
-        return 8888;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    protected int getDefaultTlsPort()
-    {
-        // The idea of overriding Videobridge's default is probably an attempt
-        // to have Videobridge and Jicofo running on the same machine with their
-        // defaults and without them clashing.
-        return 8843;
+        // The server started here handles many endpoints (health checks, etc.), hence the generic
+        // configuration key scope (jicofo.rest), but this class is responsible for starting it.
+        super(AUTH_PNAME, "jicofo.rest");
     }
 
     /**
@@ -146,23 +125,26 @@ public class AuthBundleActivator
     {
         List<Handler> handlers = new ArrayList<>();
 
-        // FIXME While Shibboleth is optional, the health checks of Jicofo (over
-        // REST) are mandatory at the time of this writing. Make the latter
-        // optional as well (in a way similar to Videobridge, for example).
-        ServletContextHandler appHandler = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
-        appHandler.setContextPath("/");
-        appHandler.addServlet(new ServletHolder(new ServletContainer(new Application(bundleContext))), "/*");
-        handlers.add(appHandler);
-
         // Shibboleth
         if (authAuthority instanceof ShibbolethAuthAuthority)
         {
+            logger.info("Adding Shibboleth handler");
             ShibbolethAuthAuthority shibbolethAuthAuthority
                 = (ShibbolethAuthAuthority) authAuthority;
 
             handlers.add(new ShibbolethHandler(shibbolethAuthAuthority));
         }
-    
+
+        // FIXME While Shibboleth is optional, the health checks of Jicofo (over
+        // REST) are mandatory at the time of this writing. Make the latter
+        // optional as well (in a way similar to Videobridge, for example).
+        ServletContextHandler appHandler
+            = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
+        appHandler.setContextPath("/");
+        appHandler.addServlet(new ServletHolder(new ServletContainer(
+            new Application(bundleContext))), "/*");
+        handlers.add(appHandler);
+
         return initializeHandlerList(handlers);
     }
 
@@ -176,7 +158,7 @@ public class AuthBundleActivator
         AuthBundleActivator.bundleContext = bundleContext;
 
         ConfigurationService cfg
-            = ServiceUtils.getService(
+            = ServiceUtils2.getService(
                     bundleContext,
                     ConfigurationService.class);
         String loginUrl = cfg.getString(LOGIN_URL_PNAME);
@@ -188,7 +170,7 @@ public class AuthBundleActivator
             = cfg.getBoolean(
                     DISABLE_AUTOLOGIN_PNAME, false);
 
-        if (!StringUtils.isNullOrEmpty(loginUrl))
+        if (isNotBlank(loginUrl))
         {
             logger.info("Starting authentication service... URL: " + loginUrl);
 

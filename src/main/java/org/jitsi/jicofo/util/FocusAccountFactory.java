@@ -25,6 +25,8 @@ import org.jxmpp.stringprep.*;
 
 import java.util.*;
 
+import static org.apache.commons.lang3.StringUtils.*;
+
 /**
  * Class contains factory methods for creating <tt>JabberAccountID</tt> used by
  * the focus of Jitsi Meet conference.
@@ -40,6 +42,7 @@ public class FocusAccountFactory
      * <tt>domain</tt> which uses anonymous login method.
      *
      * @param serverAddress XMPP server address.
+     * @param serverPort XMPP server port(5222 by default).
      * @param domain name of the XMPP domain on which the focus will register.
      * @param userName user name used by the focus user.
      *
@@ -47,10 +50,11 @@ public class FocusAccountFactory
      */
     public static Map<String, String> createFocusAccountProperties(
             String serverAddress,
+            String serverPort,
             DomainBareJid domain,
             Resourcepart userName)
     {
-        HashMap<String, String> properties = new HashMap<String, String>();
+        HashMap<String, String> properties = new HashMap<>();
 
         Resourcepart resource = null;
         try
@@ -67,7 +71,16 @@ public class FocusAccountFactory
 
         properties.put(ProtocolProviderFactory.USER_ID, userID);
         properties.put(ProtocolProviderFactory.SERVER_ADDRESS, serverAddress);
-        properties.put(ProtocolProviderFactory.SERVER_PORT, "5222");
+
+        if (isBlank(serverPort))
+        {
+            properties.put(ProtocolProviderFactory.SERVER_PORT, "5222");
+        }
+        else
+        {
+            properties.put(ProtocolProviderFactory.SERVER_PORT, serverPort.trim());
+        }
+
 
         // This is used as the multi user chat nick when joining the room
         properties.put(ProtocolProviderFactory.DISPLAY_NAME, userName.toString());
@@ -128,6 +141,7 @@ public class FocusAccountFactory
      *  the room).
      *
      * @param serverAddress XMPP server address.
+     * @param serverPort XMPP server port(5222 by default).
      * @param domain name of the XMPP domain on which the focus will register.
      * @param userName the nickname used by the focus in MUC room
      *                 (also used as login name).
@@ -137,13 +151,17 @@ public class FocusAccountFactory
      */
     public static Map<String, String> createFocusAccountProperties(
             String serverAddress,
+            String serverPort,
             DomainBareJid domain,
             Resourcepart userName,
             String password)
     {
         Map<String, String> properties
             = createFocusAccountProperties(
-                    serverAddress, domain, userName);
+                    serverAddress,
+                    serverPort,
+                    domain,
+                    userName);
 
         properties.put(
                 ProtocolProviderFactory.AUTHORIZATION_NAME,

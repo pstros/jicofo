@@ -22,6 +22,7 @@ import static org.jitsi.xmpp.extensions.colibri.ColibriStatsExtension.*;
 
 import org.jitsi.jicofo.*;
 import org.jitsi.jicofo.xmpp.*;
+import org.json.simple.*;
 import org.jxmpp.jid.*;
 
 import java.util.*;
@@ -49,7 +50,7 @@ public class JigasiDetector
     /**
      * The local region of the this jicofo instance.
      */
-    private final String localRegion;
+    private final String localRegion = JicofoConfig.config.localRegion();
 
     /**
      * Constructs new JigasiDetector.
@@ -60,17 +61,12 @@ public class JigasiDetector
      * the first one. Or it can be full room id:
      * roomName@muc-servicename.jabserver.com.
      */
-    public JigasiDetector(
-        ProtocolProviderHandler protocolProvider,
-        String breweryName,
-        String localRegion)
+    public JigasiDetector(ProtocolProviderHandler protocolProvider, String breweryName)
     {
         super(protocolProvider,
             breweryName,
             ColibriStatsExtension.ELEMENT_NAME,
             ColibriStatsExtension.NAMESPACE);
-
-        this.localRegion = localRegion;
     }
 
     @Override
@@ -94,7 +90,7 @@ public class JigasiDetector
     public Jid selectTranscriber(
         List<Jid> exclude, Collection<String> preferredRegions)
     {
-        return this.selectJigasi(
+        return JigasiDetector.selectJigasi(
             instances, exclude, preferredRegions, localRegion, true);
     }
 
@@ -339,5 +335,34 @@ public class JigasiDetector
         BrewInstance bi)
     {
         return bi.status != null ? bi.status.getValueAsInt(PARTICIPANTS): 0;
+    }
+
+    public int getJigasiSipCount()
+    {
+        return (int) instances.stream().filter(i -> supportSip(i)).count();
+    }
+
+    public int getJigasiSipInGracefulShutdownCount()
+    {
+        return (int) instances.stream()
+            .filter(i -> supportSip(i))
+            .filter(i -> isInGracefulShutdown(i)).count();
+    }
+
+    public int getJigasiTranscriberCount()
+    {
+        return (int) instances.stream().filter(i -> supportTranscription(i)).count();
+    }
+
+    @SuppressWarnings("unchecked")
+    public JSONObject getStats()
+    {
+        JSONObject stats = new JSONObject();
+        stats.put("sip_count", getJigasiSipCount());
+        stats.put("sip_in_graceful_shutdown_count",
+            getJigasiSipInGracefulShutdownCount());
+        stats.put("transcriber_count", getJigasiTranscriberCount());
+
+        return stats;
     }
 }

@@ -44,14 +44,14 @@ public class MockRoomMember
 
     private ChatRoomMemberRole role = ChatRoomMemberRole.MEMBER;
 
-    MockRoomMember(EntityFullJid address, MockMultiUserChat chatRoom)
+    public MockRoomMember(EntityFullJid address, MockMultiUserChat chatRoom)
     {
         this.address = address;
         this.name = address.getResourceOrThrow();
         this.room = chatRoom;
     }
 
-    public void setupFeatures(boolean useBundle)
+    public void setupFeatures()
     {
         OperationSetSimpleCaps caps
                 = room.getParentProvider()
@@ -60,11 +60,6 @@ public class MockRoomMember
         MockSetSimpleCapsOpSet mockCaps = (MockSetSimpleCapsOpSet) caps;
 
         List<String> features = DiscoveryUtil.getDefaultParticipantFeatureSet();
-        if (!useBundle)
-        {
-            features.remove(DiscoveryUtil.FEATURE_RTCP_MUX);
-            features.remove(DiscoveryUtil.FEATURE_RTP_BUNDLE);
-        }
 
         MockCapsNode myNode
             = new MockCapsNode(

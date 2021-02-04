@@ -20,7 +20,6 @@ package org.jitsi.jicofo.auth;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.server.handler.*;
 
-import org.jitsi.utils.*;
 import org.jitsi.utils.logging.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.impl.*;
@@ -29,6 +28,8 @@ import javax.servlet.*;
 import javax.servlet.http.*;
 import java.io.*;
 import java.util.*;
+
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Implements a Jetty <tt>Handler</tt> which is meant to be used as a servlet
@@ -51,7 +52,13 @@ class ShibbolethHandler
     private static final Logger logger
             = Logger.getLogger(ShibbolethHandler.class);
 
+    /**
+     * The target on which shibboleth requests are made
+     */
+    private static final String SHIBBOLETH_TARGET = "/login";
+
     private final ShibbolethAuthAuthority shibbolethAuthAuthority;
+
 
     /**
      * Initializes a new <tt>ShibbolethHandler</tt> instance.
@@ -75,6 +82,11 @@ class ShibbolethHandler
             throws IOException,
             ServletException
     {
+        if (!target.startsWith(SHIBBOLETH_TARGET))
+        {
+            return;
+        }
+
         try
         {
             doHandle(target, baseRequest, request, response);
@@ -185,7 +197,7 @@ class ShibbolethHandler
             = JidCreate.entityBareFrom(request.getParameter("room"));
 
         String machineUID = request.getParameter("machineUID");
-        if (StringUtils.isNullOrEmpty(machineUID))
+        if (isBlank(machineUID))
         {
             response.sendError(
                 HttpServletResponse.SC_BAD_REQUEST,
@@ -195,7 +207,7 @@ class ShibbolethHandler
 
         // Check 'mail' attribute which should be set by Shibboleth through AJP
         String email = getShibAttr(request, "mail");
-        if (StringUtils.isNullOrEmpty(email))
+        if (isBlank(email))
         {
             response.sendError(
                 HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
@@ -242,8 +254,23 @@ class ShibbolethHandler
                 "(function() {\n" +
                 " var sessionId = '" + sessionId + "';\n" +
                 " localStorage.setItem('sessionId', sessionId);\n" +
-                " console.info('sessionID :' + sessionId);\n";
-
+                " console.info('sessionID :' + sessionId);\n" +
+                " var displayName = '" + displayName + "';\n" +
+                " console.info('displayName :' + displayName);\n" +
+                " var settings = localStorage.getItem('features/base/settings');\n" +
+                " console.info('settings :' + settings);\n" +
+                " if (settings){\n" +
+                "     try {\n" +
+                "	        var settingsObj = JSON.parse(settings);\n" +
+                "	        if ( settingsObj && !settingsObj.displayName ) {\n" +
+                "	            settingsObj.displayName = displayName;\n" +
+                "	            localStorage.setItem('features/base/settings', JSON.stringify(settingsObj));\n" +
+                "         }\n" +
+                "     }\n" +
+                "   catch(e){\n" +
+                "     console.error('Unable to parse settings JSON');\n" +
+                "   }\n" +
+                " }\n" ;
         if (close)
         {
             // Pass session id and close the popup

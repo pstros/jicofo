@@ -22,16 +22,13 @@ import mock.jvb.*;
 import mock.util.*;
 import mock.xmpp.*;
 
-import net.java.sip.communicator.util.*;
-
 import org.jitsi.eventadmin.*;
-import org.jitsi.jicofo.discovery.*;
+import org.jitsi.jicofo.bridge.*;
 import org.jitsi.jicofo.event.*;
 
 import org.jitsi.jicofo.util.*;
+import org.jitsi.osgi.*;
 import org.junit.*;
-import org.junit.runner.*;
-import org.junit.runners.*;
 import org.jxmpp.jid.*;
 import org.jxmpp.jid.impl.*;
 
@@ -87,7 +84,7 @@ public class JvbDoctorTest
         Jid jvb1 = JidCreate.from("jvb1.example.com");
 
         FocusManager focusManager
-            = ServiceUtils.getService(osgi.bc, FocusManager.class);
+            = ServiceUtils2.getService(osgi.bc, FocusManager.class);
 
         assertNotNull(focusManager);
 
@@ -99,29 +96,21 @@ public class JvbDoctorTest
         MockVideobridge mockBridge
             = new MockVideobridge(new MockXmppConnection(jvb1), jvb1);
 
-        // Make sure that jvb advertises health-check support
-        MockSetSimpleCapsOpSet mockCaps = focusPps.getMockCapsOpSet();
-        MockCapsNode jvbNode
-            = new MockCapsNode(
-                    jvb1,
-                    new String[] { DiscoveryUtil.FEATURE_HEALTH_CHECK });
-        mockCaps.addChildNode(jvbNode);
-
         // Make mock JVB return error response to health-check IQ
         mockBridge.setReturnServerError(true);
 
         mockBridge.start(osgi.bc);
 
         JitsiMeetServices meetServices
-            = ServiceUtils.getService(osgi.bc, JitsiMeetServices.class);
+            = ServiceUtils2.getService(osgi.bc, JitsiMeetServices.class);
 
         EventHandler eventSpy = mock(EventHandler.class);
         EventUtil.registerEventHandler(
             osgi.bc,
             new String[] {
                 BridgeEvent.BRIDGE_UP,
-                BridgeEvent.BRIDGE_DOWN,
-                BridgeEvent.HEALTH_CHECK_FAILED },
+                BridgeEvent.BRIDGE_DOWN
+            },
             eventSpy);
 
         BridgeSelector selector = meetServices.getBridgeSelector();
@@ -153,10 +142,6 @@ public class JvbDoctorTest
                 focusManager.getConference(testConf1.getRoomName()));
         }
 
-        // Here we verify that first there was HEALTH_CHECK_FAILED event
-        // send by JvbDoctor
-        verify(eventSpy, timeout(HEALTH_CHECK_INT + 100))
-            .handleEvent(BridgeEvent.createHealthFailed(jvb1));
         // and after that BRIDGE_DOWN should be triggered
         // by BridgeSelector
         verify(eventSpy, timeout(100))

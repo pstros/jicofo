@@ -44,8 +44,7 @@ public interface OperationSetJingle
      * @param requestHandler <tt>JingleRequestHandler</tt> that will be bound
      * to new Jingle session instance.
      *
-     * @return {@code true} if a response of type {@code result} is received
-     * before the timeout.
+     * @return {@code true} the client didn't come back with en error response.
      *
      * @throws OperationFailedException with
      * {@link OperationFailedException#PROVIDER_NOT_REGISTERED} if the operation
@@ -77,7 +76,7 @@ public interface OperationSetJingle
      * @param jingleIQ the IQ which to be sent.
      * @param session the <tt>JingleSession</tt> for which the IQ will be sent.
      *
-     * @return {@code true} if an IQ of type {@code result} is received.
+     * @return {@code true} the client didn't come back with an error response.
      *
      * @throws OperationFailedException with
      * {@link OperationFailedException#PROVIDER_NOT_REGISTERED} if the operation
@@ -126,16 +125,17 @@ public interface OperationSetJingle
                             JingleSession session);
 
     /**
-     * Terminates given session by sending 'session-terminate' IQ which will
-     * optionally include the <tt>Reason</tt> supplied.
+     * Terminates given Jingle session. This method is to be called either to send 'session-terminate' or to inform
+     * this operation set that the session has been terminated as a result of 'session-terminate' received from
+     * the other peer in which case {@code sendTerminate} should be set to {@code false}.
      *
-     * @param session the <tt>JingleSession</tt> to be terminated.
-     * @param reason optional <tt>Reason</tt> specifying the reason of session
-     *               termination.
-     * @param message optional text message providing more details about
-     *                the reason for terminating the session.
+     * @param session the <tt>JingleSession</tt> to terminate.
+     * @param reason one of {@link Reason} enum that indicates why the session
+     *               is being ended or <tt>null</tt> to omit.
+     * @param sendTerminate when {@code true} it means that a 'session-terminate' is to be sent, otherwise it means
+     * the session is being ended on the remote peer's request.
      */
-    void terminateSession(JingleSession session, Reason reason, String message);
+    void terminateSession(JingleSession session, Reason reason, String message, boolean sendTerminate);
 
     /**
      * Terminates all active Jingle Sessions associated with given

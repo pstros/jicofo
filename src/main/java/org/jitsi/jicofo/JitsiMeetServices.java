@@ -17,28 +17,22 @@
  */
 package org.jitsi.jicofo;
 
-import net.java.sip.communicator.impl.protocol.jabber.*;
-import org.jitsi.xmpp.extensions.colibri.*;
+import org.jitsi.jicofo.bridge.*;
 
-import org.jitsi.eventadmin.*;
 import org.jitsi.jicofo.discovery.*;
 import org.jitsi.jicofo.discovery.Version;
-import org.jitsi.jicofo.event.*;
 import org.jitsi.jicofo.jigasi.*;
 import org.jitsi.jicofo.recording.jibri.*;
 import org.jitsi.jicofo.xmpp.*;
-import org.jitsi.osgi.*;
-import org.jitsi.protocol.xmpp.*;
 import org.jitsi.service.configuration.*;
-import org.jitsi.utils.*;
 import org.jitsi.utils.logging.*;
 
+import org.json.simple.*;
 import org.jxmpp.jid.*;
-import org.osgi.framework.*;
 
 import java.util.*;
 
-import static org.jitsi.jicofo.BridgeSelector.*;
+import static org.apache.commons.lang3.StringUtils.*;
 
 /**
  * Class manages discovery of Jitsi Meet application services like
@@ -47,33 +41,12 @@ import static org.jitsi.jicofo.BridgeSelector.*;
  * @author Pawel Domas
  */
 public class JitsiMeetServices
-    extends EventHandlerActivator
 {
     /**
      * The logger
      */
     private final static Logger logger
         = Logger.getLogger(JitsiMeetServices.class);
-
-    /**
-     * The set of features sufficient for a node to be recognized as a
-     * jitsi-videobridge.
-     */
-    public static final String[] VIDEOBRIDGE_FEATURES = new String[]
-        {
-            ColibriConferenceIQ.NAMESPACE,
-            ProtocolProviderServiceJabberImpl
-                .URN_XMPP_JINGLE_DTLS_SRTP,
-            ProtocolProviderServiceJabberImpl
-                .URN_XMPP_JINGLE_ICE_UDP_1
-        };
-
-    /**
-     * The XMPP Service Discovery features of MUC service provided by the XMPP
-     * server.
-     */
-    private static final String[] MUC_FEATURES
-        = { "http://jabber.org/protocol/muc" };
 
     /**
      * Features advertised by SIP gateway component.
@@ -85,25 +58,21 @@ public class JitsiMeetServices
         };
 
     /**
-     * Features used to recognize pub-sub service.
-     */
-    /*private static final String[] PUBSUB_FEATURES = new String[]
-        {
-            "http://jabber.org/protocol/pubsub",
-            "http://jabber.org/protocol/pubsub#subscribe"
-        };*/
-
-    /**
      * Manages Jitsi Videobridge component XMPP addresses.
      */
     private final BridgeSelector bridgeSelector;
 
-    private Set<BaseBrewery> breweryDetectors = new HashSet<>();
+    private final Set<BaseBrewery> breweryDetectors = new HashSet<>();
 
     /**
      * The name of XMPP domain to which Jicofo user logs in.
      */
     private final DomainBareJid jicofoUserDomain;
+
+    /**
+     * The {@link ProtocolProviderHandler} for JVB XMPP connection.
+     */
+    private final ProtocolProviderHandler jvbBreweryProtocolProvider;
 
     /**
      * The {@link ProtocolProviderHandler} for Jicofo XMPP connection.
@@ -116,59 +85,32 @@ public class JitsiMeetServices
     private Jid sipGateway;
 
     /**
-     * The address of MUC component served by our XMPP domain.
-     */
-    private Jid mucService;
-
-    /**
      * <tt>Version</tt> IQ instance holding detected XMPP server's version
      * (if any).
      */
     private Version XMPPServerVersion;
 
     /**
-     * Returns <tt>true</tt> if given list of features complies with JVB feature
-     * list.
-     * @param features the list of feature to be checked.
-     */
-    static public boolean isJitsiVideobridge(List<String> features)
-    {
-        return DiscoveryUtil.checkFeatureSupport(
-                VIDEOBRIDGE_FEATURES, features);
-    }
-
-    /**
      * Creates new instance of <tt>JitsiMeetServices</tt>
      *  @param protocolProviderHandler {@link ProtocolProviderHandler} for Jicofo
+     *        XMPP connection.
+     * @param jvbMucProtocolProvider {@link ProtocolProviderHandler} for JVB
      *        XMPP connection.
      * @param jicofoUserDomain the name of the XMPP domain to which Jicofo user
      */
     public JitsiMeetServices(ProtocolProviderHandler protocolProviderHandler,
+                             ProtocolProviderHandler jvbMucProtocolProvider,
                              DomainBareJid jicofoUserDomain)
     {
-        super(new String[] { BridgeEvent.HEALTH_CHECK_FAILED });
-
         Objects.requireNonNull(
             protocolProviderHandler, "protocolProviderHandler");
-
-        OperationSetSubscription subscriptionOpSet
-            = protocolProviderHandler.getOperationSet(
-                    OperationSetSubscription.class);
-
-        Objects.requireNonNull(subscriptionOpSet, "subscriptionOpSet");
+        Objects.requireNonNull(
+            jvbMucProtocolProvider, "jvbMucProtocolProvider");
 
         this.jicofoUserDomain = jicofoUserDomain;
         this.protocolProvider = protocolProviderHandler;
-        this.bridgeSelector = new BridgeSelector(subscriptionOpSet);
-    }
-
-    /**
-     * Called by other classes when they detect JVB instance.
-     * @param bridgeJid the JID of discovered JVB component.
-     */
-    void newBridgeDiscovered(Jid bridgeJid, Version version)
-    {
-        bridgeSelector.addJvbAddress(bridgeJid, version);
+        this.jvbBreweryProtocolProvider = jvbMucProtocolProvider;
+        this.bridgeSelector = new BridgeSelector();
     }
 
     /**
@@ -183,44 +125,21 @@ public class JitsiMeetServices
                            List<String> features,
                            Version version)
     {
-        if (isJitsiVideobridge(features))
-        {
-            newBridgeDiscovered(node, version);
-        }
-        else if (sipGateway == null
+        if (sipGateway == null
             && DiscoveryUtil.checkFeatureSupport(SIP_GW_FEATURES, features))
         {
             logger.info("Discovered SIP gateway: " + node);
 
             setSipGateway(node);
         }
-        else if (mucService == null
-            && DiscoveryUtil.checkFeatureSupport(MUC_FEATURES, features))
-        {
-            logger.info("MUC component discovered: " + node);
-
-            setMucService(node);
-        }
-        else if (jicofoUserDomain != null && jicofoUserDomain.equals(node))
+        else if (jicofoUserDomain != null
+                && jicofoUserDomain.equals(node) && version != null)
         {
             this.XMPPServerVersion = version;
 
-            logger.info("Detected XMPP server version: " + version);
+            logger.info("Detected XMPP server version: "
+                + version.getNameVersionOsString());
         }
-        /*
-        FIXME: pub-sub service auto-detect ?
-        else if (capsOpSet.hasFeatureSupport(item, PUBSUB_FEATURES))
-        {
-            // Potential PUBSUB service
-            logger.info("Potential PUBSUB service:" + item);
-            List<String> subItems = capsOpSet.getItems(item);
-            for (String subItem: subItems)
-            {
-                logger.info("Subnode " + subItem + " of " + item);
-                capsOpSet.hasFeatureSupport(
-                    item, subItem, VIDEOBRIDGE_FEATURES);
-            }
-        }*/
     }
 
     /**
@@ -239,12 +158,6 @@ public class JitsiMeetServices
             logger.warn("SIP gateway went offline: " + node);
 
             sipGateway = null;
-        }
-        else if (node.equals(mucService))
-        {
-            logger.warn("MUC component went offline: " + node);
-
-            mucService = null;
         }
     }
 
@@ -315,36 +228,15 @@ public class JitsiMeetServices
         return bridgeSelector;
     }
 
-    /**
-     * Returns the address of MUC component for our XMPP domain.
-     */
-    public Jid getMucService()
-    {
-        return mucService;
-    }
-
-    /**
-     * Sets the address of MUC component.
-     * @param mucService component sub domain that refers to MUC
-     */
-    public void setMucService(Jid mucService)
-    {
-        this.mucService = mucService;
-    }
-
-    @Override
-    public void start(BundleContext bundleContext)
-        throws Exception
+    public void start()
     {
         bridgeSelector.init();
-
-        super.start(bundleContext);
 
         ConfigurationService config = FocusBundleActivator.getConfigService();
         String jibriBreweryName
             = config.getString(JibriDetector.JIBRI_ROOM_PNAME);
 
-        if (!StringUtils.isNullOrEmpty(jibriBreweryName))
+        if (isNotBlank(jibriBreweryName))
         {
             JibriDetector jibriDetector
                 = new JibriDetector(protocolProvider, jibriBreweryName, false);
@@ -356,13 +248,9 @@ public class JitsiMeetServices
 
         String jigasiBreweryName
             = config.getString(JigasiDetector.JIGASI_ROOM_PNAME);
-        if (!StringUtils.isNullOrEmpty(jigasiBreweryName))
+        if (isNotBlank(jigasiBreweryName))
         {
-            JigasiDetector jigasiDetector
-                = new JigasiDetector(
-                    protocolProvider,
-                    jigasiBreweryName,
-                    config.getString(LOCAL_REGION_PNAME, null));
+            JigasiDetector jigasiDetector = new JigasiDetector(protocolProvider, jigasiBreweryName);
             logger.info("Using a Jigasi detector with MUC: " + jigasiBreweryName);
 
             jigasiDetector.init();
@@ -371,7 +259,7 @@ public class JitsiMeetServices
 
         String jibriSipBreweryName
             = config.getString(JibriDetector.JIBRI_SIP_ROOM_PNAME);
-        if (!StringUtils.isNullOrEmpty(jibriSipBreweryName))
+        if (isNotBlank(jibriSipBreweryName))
         {
             JibriDetector sipJibriDetector
                 = new JibriDetector(
@@ -385,11 +273,13 @@ public class JitsiMeetServices
 
         String bridgeBreweryName
             = config.getString(BridgeMucDetector.BRIDGE_MUC_PNAME);
-        if (!StringUtils.isNullOrEmpty(bridgeBreweryName))
+        if (isNotBlank(bridgeBreweryName))
         {
             BridgeMucDetector bridgeMucDetector
                 = new BridgeMucDetector(
-                    protocolProvider, bridgeBreweryName, bridgeSelector);
+                    jvbBreweryProtocolProvider,
+                    bridgeBreweryName,
+                    bridgeSelector);
             logger.info(
                 "Using a Bridge MUC detector with MUC: " + bridgeBreweryName);
 
@@ -398,27 +288,12 @@ public class JitsiMeetServices
         }
     }
 
-    @Override
-    public void stop(BundleContext bundleContext)
-        throws Exception
+    public void stop()
     {
         breweryDetectors.forEach(BaseBrewery::dispose);
         breweryDetectors.clear();
 
         bridgeSelector.dispose();
-
-        super.stop(bundleContext);
-    }
-
-    @Override
-    public void handleEvent(Event event)
-    {
-        if (BridgeEvent.HEALTH_CHECK_FAILED.equals(event.getTopic()))
-        {
-            BridgeEvent bridgeEvent = (BridgeEvent) event;
-
-            bridgeSelector.removeJvbAddress(bridgeEvent.getBridgeJid());
-        }
     }
 
     /**
@@ -432,17 +307,30 @@ public class JitsiMeetServices
         return XMPPServerVersion;
     }
 
-    /**
-     * Finds the version of the videobridge identified by given
-     * <tt>bridgeJid</tt>.
-     *
-     * @param bridgeJid the XMPP address of the videobridge for which we want to
-     *        obtain the version.
-     *
-     * @return JVB version or <tt>null</tt> if unknown.
-     */
-    public String getBridgeVersion(Jid bridgeJid)
+    @SuppressWarnings("unchecked")
+    public JSONObject getStats()
     {
-        return bridgeSelector.getBridgeVersion(bridgeJid);
+        JSONObject json = new JSONObject();
+
+        json.put("bridge_selector", bridgeSelector.getStats());
+        JigasiDetector jigasiDetector = getJigasiDetector();
+        if (jigasiDetector != null)
+        {
+            json.put("jigasi_detector", jigasiDetector.getStats());
+        }
+
+        JibriDetector jibriDetector = getJibriDetector();
+        if (jibriDetector != null)
+        {
+            json.put("jibri_detector", jibriDetector.getStats());
+        }
+
+        JibriDetector sipJibriDetector = getSipJibriDetector();
+        if (sipJibriDetector != null)
+        {
+            json.put("sip_jibri_detector", sipJibriDetector.getStats());
+        }
+
+        return json;
     }
 }
