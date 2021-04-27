@@ -196,6 +196,14 @@ public abstract class AbstractOperationSetJingle
             GroupPacketExtension group
                 = GroupPacketExtension.createBundleGroup(contents);
 
+            // TODO: remove this for loop after the PR in jitsi is merged: https://github.com/jitsi/jitsi/pull/498
+            // this is to fix an issue with stanza.io parsing the group element because jitsi is giving it the
+            // wrong namespace for when it is in the group element (vs the jingle element)
+            for (ContentPacketExtension content : group.getContents())
+            {
+                content.setNamespace(null);
+            }
+
             inviteIQ.addExtension(group);
         }
 
